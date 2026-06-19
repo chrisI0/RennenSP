@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RennenSP — Racing Simulator</title>
+    <meta name="description" content="A realistic 3D browser-based racing simulator with peer-to-peer multiplayer." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="render-canvas"></canvas>
+      <div id="hud-overlay">
+        <div id="hud-title">
+          <span class="title-rennen">RENNEN</span><span class="title-sp">SP</span>
+        </div>
+        <div id="hud-controls">
+          <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <span>Move</span></div>
+          <div class="control-row"><kbd>Shift</kbd> <span>Sprint</span></div>
+          <div class="control-row"><kbd>RMB</kbd> <span>Look around</span></div>
+          <div class="control-row"><kbd>Scroll</kbd> <span>Adjust speed</span></div>
+        </div>
+        <div id="hud-speed">
+          <span id="speed-value">0.0</span>
+          <span id="speed-unit">m/s</span>
+        </div>
+        <div id="hud-position">
+          <span id="pos-x">X: 0.0</span>
+          <span id="pos-z">Z: 0.0</span>
+        </div>
+      </div>
+      <div id="loading-screen">
+        <div class="loader-content">
+          <div class="loader-title"><span class="title-rennen">RENNEN</span><span class="title-sp">SP</span></div>
+          <div class="loader-bar-track"><div class="loader-bar-fill" id="loader-fill"></div></div>
+          <div class="loader-text">Initializing simulation...</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
