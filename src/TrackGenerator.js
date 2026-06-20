@@ -179,11 +179,11 @@ export class TrackGenerator {
       const isRed = (Math.floor(i / 2) % 2 === 0);
       const finalColor = isRed ? redColor : whiteColor;
 
-      // 1. Left Kerb Quad (from -6.5m to -6.0m, outside of track edge)
+      // 1. Left Kerb Quad (from -7.0m to -6.0m, outside of track edge)
       const leftInner0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -6.0);
-      const leftOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -6.5);
+      const leftOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -7.0);
       const leftInner1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -6.0);
-      const leftOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -6.5);
+      const leftOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -7.0);
 
       vertices.push(leftInner0.x, 0.051, leftInner0.z);
       vertices.push(leftOuter0.x, 0.051, leftOuter0.z);
@@ -198,11 +198,11 @@ export class TrackGenerator {
       indices.push(vIdx + 1, vIdx + 3, vIdx + 2);
       vIdx += 4;
 
-      // 2. Right Kerb Quad (from 6.0m to 6.5m, outside of track edge)
+      // 2. Right Kerb Quad (from 6.0m to 7.0m, outside of track edge)
       const rightInner0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 6.0);
-      const rightOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 6.5);
+      const rightOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 7.0);
       const rightInner1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 6.0);
-      const rightOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 6.5);
+      const rightOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 7.0);
 
       vertices.push(rightInner0.x, 0.051, rightInner0.z);
       vertices.push(rightOuter0.x, 0.051, rightOuter0.z);
