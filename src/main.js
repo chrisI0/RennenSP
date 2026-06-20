@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import './style.css';
 import { createGrid } from './grid.js';
 import { setupEnvironment } from './environment.js';
-import { CameraController } from './camera.js';
+import { SimVehicleCameraManager } from './camera.js';
+import { MouseSimInputManager } from './input.js';
+import { SimpleRaycastVehicle } from './vehicle.js';
 
 /**
  * RennenSP — Main Entry Point
@@ -19,6 +21,12 @@ const hudOverlay = document.getElementById('hud-overlay');
 const speedValue = document.getElementById('speed-value');
 const posX = document.getElementById('pos-x');
 const posZ = document.getElementById('pos-z');
+
+// Telemetry Dashboard elements
+const hudDashboard = document.getElementById('hud-dashboard');
+const gearValue = document.getElementById('gear-value');
+const rpmBarFill = document.getElementById('rpm-bar-fill');
+const rpmValue = document.getElementById('rpm-value');
 
 // ============================================
 // Renderer
@@ -86,8 +94,32 @@ async function init() {
   // Add reference objects so the grid doesn't feel empty
   addReferenceObjects(scene);
 
-  // Camera controller
-  const cameraController = new CameraController(camera, canvas);
+  // Chase camera manager (follows vehicle)
+  const cameraManager = new SimVehicleCameraManager(camera, {
+    followDistance:    6.0,   // meters behind
+    followHeight:      2.2,   // meters above
+    lookAheadDistance: 1.5,   // focus point ahead of center
+    positionSmoothing: 5.0,   // fast position follow
+    lookAtSmoothing:   5.0,   // fast look-at follow
+    baseFOV:           65,
+    maxFOV:            78,
+    maxSpeedForFOV:    65,    // m/s (≈ 234 km/h)
+    minHeight:         0.8,
+  });
+
+  // Mouse sim input manager (virtual steering + pedals)
+  const inputManager = new MouseSimInputManager({
+    deadzone: 0.04,
+    steeringSensitivity: 8,
+    autoCenterKey: 'Space',
+    showOverlay: true,
+  });
+
+  // Spawn vehicle
+  const vehicle = new SimpleRaycastVehicle(
+    scene,
+    new THREE.Vector3(0, 2, 5)   // spawn slightly above ground — will settle via suspension
+  );
 
   // Finish loading
   await simulateLoading();
@@ -102,14 +134,43 @@ async function init() {
 
     const dt = Math.min(clock.getDelta(), 0.05); // cap delta to avoid jumps
 
-    // Update camera
-    cameraController.update(dt);
+    // Update input manager
+    inputManager.update(dt);
 
-    // Update HUD
-    const speed = cameraController.getSpeed();
-    speedValue.textContent = speed.toFixed(1);
-    posX.textContent = `X: ${camera.position.x.toFixed(1)}`;
-    posZ.textContent = `Z: ${camera.position.z.toFixed(1)}`;
+    // Update vehicle physics
+    vehicle.update(dt, inputManager);
+
+    // Update chase camera (tracks vehicle) - AFTER vehicle physics update!
+    cameraManager.update(dt, vehicle.mesh, vehicle.velocity);
+
+    // Update HUD with vehicle telemetry
+    const speedKmh = vehicle.getSpeedKmh();
+    speedValue.textContent = speedKmh.toFixed(0);
+
+    // Update gear indicator
+    if (gearValue) {
+      gearValue.textContent = vehicle.getGearName();
+    }
+
+    // Update RPM value and bar
+    if (rpmValue && rpmBarFill) {
+      rpmValue.textContent = Math.round(vehicle.rpm).toLocaleString();
+      const rpmPct = Math.min(Math.max((vehicle.rpm / vehicle.maxRPM) * 100, 0), 100);
+      rpmBarFill.style.width = `${rpmPct}%`;
+    }
+
+    // Flashing threshold at 14,000+ RPM
+    if (hudDashboard) {
+      if (vehicle.rpm >= 14000) {
+        hudDashboard.classList.add('rpm-critical-flash');
+      } else {
+        hudDashboard.classList.remove('rpm-critical-flash');
+      }
+    }
+
+    const vPos = vehicle.getPosition();
+    posX.textContent = `X: ${vPos.x.toFixed(1)}`;
+    posZ.textContent = `Z: ${vPos.z.toFixed(1)}`;
 
     // Render
     renderer.render(scene, camera);

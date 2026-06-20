@@ -1,229 +1,135 @@
 import * as THREE from 'three';
 
 /**
- * Free-roam camera controller for exploring the 3D scene.
+ * SimVehicleCameraManager
  *
- * Controls:
- *   W/S        — Move forward/backward
- *   A/D        — Strafe left/right
- *   Shift      — Sprint (2x speed)
- *   Right-click drag / Middle-click drag — Pan/look around
- *   Scroll     — Adjust base movement speed
+ * High-performance chase camera that tracks a SimpleRaycastVehicle chassis.
+ *
+ * Features:
+ *   • Smooth exponential-lerp position/rotation following using THREE.Vector3.lerp
+ *   • Stable horizontal-only camera positioning to prevent sinking under pitch
+ *   • Height guardrail preventing the camera from dipping below 0.8m Y
+ *   • Speed-based dynamic FOV
+ *   • Zero per-frame heap allocations
  */
-export class CameraController {
+export class SimVehicleCameraManager {
   /**
    * @param {THREE.PerspectiveCamera} camera
-   * @param {HTMLCanvasElement} canvas
+   * @param {object} [options]
    */
-  constructor(camera, canvas) {
+  constructor(camera, options = {}) {
     this.camera = camera;
-    this.canvas = canvas;
 
-    // Movement settings
-    this.baseSpeed = 15;        // meters per second
-    this.minSpeed = 2;
-    this.maxSpeed = 100;
-    this.sprintMultiplier = 2.5;
-    this.damping = 8;           // lower = more sluggish, higher = snappier
+    // Camera geometry
+    this.followDistance    = options.followDistance    ?? 6.0;
+    this.followHeight     = options.followHeight     ?? 2.2;
+    this.lookAheadDistance = options.lookAheadDistance ?? 1.5; // target = car position + car forward vector * 1.5
 
-    // Mouse look settings
-    this.lookSensitivity = 0.002;
-    this.pitchMin = -Math.PI / 2 + 0.1;  // prevent looking straight down
-    this.pitchMax = Math.PI / 2 - 0.1;   // prevent looking straight up
+    // Smoothing rates
+    this.positionSmoothing = options.positionSmoothing ?? 5.0;
+    this.lookAtSmoothing   = options.lookAtSmoothing   ?? 5.0;
 
-    // State
-    this._yaw = -Math.PI / 2;   // start looking along -Z
-    this._pitch = -0.2;         // slight downward tilt
-    this._velocity = new THREE.Vector3();
-    this._targetVelocity = new THREE.Vector3();
-    this._isLooking = false;
-    this._keys = new Set();
-    this._currentSpeed = 0;
+    // Dynamic FOV
+    this.baseFOV        = options.baseFOV        ?? 65;
+    this.maxFOV         = options.maxFOV         ?? 78;
+    this.maxSpeedForFOV = options.maxSpeedForFOV ?? 65; // m/s (approx 234 km/h)
 
-    // Temp vectors (reuse for performance)
-    this._forward = new THREE.Vector3();
-    this._right = new THREE.Vector3();
-    this._moveDir = new THREE.Vector3();
+    // Height Guardrail
+    this.minHeight = 0.8; // Y coordinate never drops below 0.8 meters relative to the ground plane
 
-    // Apply initial rotation
-    this._updateCameraRotation();
-
-    // Bind event handlers
-    this._onKeyDown = this._onKeyDown.bind(this);
-    this._onKeyUp = this._onKeyUp.bind(this);
-    this._onMouseDown = this._onMouseDown.bind(this);
-    this._onMouseUp = this._onMouseUp.bind(this);
-    this._onMouseMove = this._onMouseMove.bind(this);
-    this._onWheel = this._onWheel.bind(this);
-    this._onContextMenu = this._onContextMenu.bind(this);
-
-    this._attachEvents();
-  }
-
-  _attachEvents() {
-    document.addEventListener('keydown', this._onKeyDown);
-    document.addEventListener('keyup', this._onKeyUp);
-    this.canvas.addEventListener('mousedown', this._onMouseDown);
-    document.addEventListener('mouseup', this._onMouseUp);
-    document.addEventListener('mousemove', this._onMouseMove);
-    this.canvas.addEventListener('wheel', this._onWheel, { passive: false });
-    this.canvas.addEventListener('contextmenu', this._onContextMenu);
-  }
-
-  _onKeyDown(e) {
-    this._keys.add(e.code);
-  }
-
-  _onKeyUp(e) {
-    this._keys.delete(e.code);
-  }
-
-  _onMouseDown(e) {
-    // Right-click (button 2) or middle-click (button 1)
-    if (e.button === 2 || e.button === 1) {
-      this._isLooking = true;
-      this.canvas.style.cursor = 'grabbing';
-    }
-  }
-
-  _onMouseUp(e) {
-    if (e.button === 2 || e.button === 1) {
-      this._isLooking = false;
-      this.canvas.style.cursor = 'grab';
-    }
-  }
-
-  _onMouseMove(e) {
-    if (!this._isLooking) return;
-
-    this._yaw -= e.movementX * this.lookSensitivity;
-    this._pitch -= e.movementY * this.lookSensitivity;
-
-    // Clamp pitch
-    this._pitch = Math.max(this.pitchMin, Math.min(this.pitchMax, this._pitch));
-
-    this._updateCameraRotation();
-  }
-
-  _onWheel(e) {
-    e.preventDefault();
-    const scrollDelta = e.deltaY > 0 ? -1 : 1;
-    this.baseSpeed = Math.max(
-      this.minSpeed,
-      Math.min(this.maxSpeed, this.baseSpeed * (1 + scrollDelta * 0.1))
-    );
-  }
-
-  _onContextMenu(e) {
-    e.preventDefault();
-  }
-
-  _updateCameraRotation() {
-    // Build a quaternion from yaw and pitch
-    const euler = new THREE.Euler(this._pitch, this._yaw, 0, 'YXZ');
-    this.camera.quaternion.setFromEuler(euler);
+    // Pre-allocated vectors for zero per-frame heap allocation
+    this._idealPos     = new THREE.Vector3();
+    this._idealLookAt  = new THREE.Vector3();
+    this._smoothLookAt = new THREE.Vector3();
+    this._carForward   = new THREE.Vector3();
+    this._carForwardXZ = new THREE.Vector3();
+    
+    this._initialized  = false;
   }
 
   /**
-   * Get the forward direction projected onto the XZ plane (horizontal).
+   * Advance the camera for one frame.
+   *
+   * @param {number}         dt                Frame delta time (seconds)
+   * @param {THREE.Object3D} vehicleChassisMesh  The vehicle's mesh (position + quaternion)
+   * @param {THREE.Vector3}  [vehicleVelocity]   The vehicle's world-space velocity vector (optional, for dynamic FOV)
    */
-  _getForward() {
-    this._forward.set(0, 0, -1);
-    this._forward.applyQuaternion(this.camera.quaternion);
-    this._forward.y = 0;
-    this._forward.normalize();
-    return this._forward;
-  }
+  update(dt, vehicleChassisMesh, vehicleVelocity) {
+    if (dt <= 0) return;
 
-  /**
-   * Get the right direction projected onto the XZ plane.
-   */
-  _getRight() {
-    this._right.set(1, 0, 0);
-    this._right.applyQuaternion(this.camera.quaternion);
-    this._right.y = 0;
-    this._right.normalize();
-    return this._right;
-  }
+    const carPos  = vehicleChassisMesh.position;
+    const carQuat = vehicleChassisMesh.quaternion;
 
-  /**
-   * Update camera position and rotation. Call once per frame.
-   * @param {number} dt — delta time in seconds
-   */
-  update(dt) {
-    // Compute desired movement direction
-    this._moveDir.set(0, 0, 0);
+    // 1. Calculate car's 3D forward vector (-Z is forward in Three.js standard for this model)
+    this._carForward.set(0, 0, -1).applyQuaternion(carQuat).normalize();
 
-    const forward = this._getForward();
-    const right = this._getRight();
-
-    if (this._keys.has('KeyW') || this._keys.has('ArrowUp')) {
-      this._moveDir.add(forward);
-    }
-    if (this._keys.has('KeyS') || this._keys.has('ArrowDown')) {
-      this._moveDir.sub(forward);
-    }
-    if (this._keys.has('KeyD') || this._keys.has('ArrowRight')) {
-      this._moveDir.add(right);
-    }
-    if (this._keys.has('KeyA') || this._keys.has('ArrowLeft')) {
-      this._moveDir.sub(right);
+    // 2. Project forward vector to XZ plane and normalize for stable behind position calculation.
+    // This stops the camera from sinking down when the vehicle pitches up under acceleration.
+    this._carForwardXZ.copy(this._carForward);
+    this._carForwardXZ.y = 0;
+    if (this._carForwardXZ.lengthSq() > 1e-6) {
+      this._carForwardXZ.normalize();
+    } else {
+      this._carForwardXZ.set(0, 0, -1);
     }
 
-    // Vertical movement
-    if (this._keys.has('Space')) {
-      this._moveDir.y += 1;
+    // 3. Ideal Position: Float exactly 6.0 meters behind the car and 2.2 meters above it
+    this._idealPos.copy(carPos).addScaledVector(this._carForwardXZ, -this.followDistance);
+    this._idealPos.y += this.followHeight;
+
+    // 4. Look-At Target: Look at a point slightly ahead of the car's center (e.g. target = car position + car forward vector * 1.5)
+    this._idealLookAt.copy(carPos).addScaledVector(this._carForward, this.lookAheadDistance);
+
+    // 5. First-frame snap
+    if (!this._initialized) {
+      this.camera.position.copy(this._idealPos);
+      this._smoothLookAt.copy(this._idealLookAt);
+
+      // Apply height guardrail
+      if (this.camera.position.y < this.minHeight) {
+        this.camera.position.y = this.minHeight;
+      }
+
+      this.camera.lookAt(this._smoothLookAt);
+      this.camera.fov = this.baseFOV;
+      this.camera.updateProjectionMatrix();
+      this._initialized = true;
+      return;
     }
-    if (this._keys.has('ControlLeft') || this._keys.has('ControlRight')) {
-      this._moveDir.y -= 1;
+
+    // 6. Smooth Follow (Lerp): Use THREE.Vector3.lerp with robust alpha factor tied to dt
+    const posAlpha  = 1 - Math.exp(-this.positionSmoothing * dt);
+    const lookAlpha = 1 - Math.exp(-this.lookAtSmoothing * dt);
+
+    this.camera.position.lerp(this._idealPos, posAlpha);
+    this._smoothLookAt.lerp(this._idealLookAt, lookAlpha);
+
+    // 7. Height Guardrail: Never drop below 0.8 meters relative to the ground plane
+    if (this.camera.position.y < this.minHeight) {
+      this.camera.position.y = this.minHeight;
     }
 
-    // Normalize if moving diagonally
-    if (this._moveDir.lengthSq() > 0) {
-      this._moveDir.normalize();
-    }
+    // 8. Apply Look-At
+    this.camera.lookAt(this._smoothLookAt);
 
-    // Speed with sprint
-    const isSprinting = this._keys.has('ShiftLeft') || this._keys.has('ShiftRight');
-    const speed = this.baseSpeed * (isSprinting ? this.sprintMultiplier : 1);
-
-    // Target velocity
-    this._targetVelocity.copy(this._moveDir).multiplyScalar(speed);
-
-    // Smooth damp towards target velocity
-    const lerpFactor = 1 - Math.exp(-this.damping * dt);
-    this._velocity.lerp(this._targetVelocity, lerpFactor);
-
-    // Store current speed for HUD
-    this._currentSpeed = this._velocity.length();
-
-    // Apply movement
-    this.camera.position.addScaledVector(this._velocity, dt);
-
-    // Keep camera above ground
-    if (this.camera.position.y < 0.5) {
-      this.camera.position.y = 0.5;
+    // 9. Dynamic FOV based on speed (optional/premium effect)
+    if (vehicleVelocity) {
+      const speed = vehicleVelocity.length();
+      const speedRatio = Math.min(Math.max(speed / this.maxSpeedForFOV, 0), 1);
+      const targetFOV = this.baseFOV + (this.maxFOV - this.baseFOV) * speedRatio;
+      const fovAlpha  = 1 - Math.exp(-3 * dt);
+      this.camera.fov += (targetFOV - this.camera.fov) * fovAlpha;
+      this.camera.updateProjectionMatrix();
     }
   }
 
-  /**
-   * Returns the current movement speed in m/s.
-   * @returns {number}
-   */
-  getSpeed() {
-    return this._currentSpeed;
+  /** Force camera to snap immediately to target */
+  snapToTarget() {
+    this._initialized = false;
   }
 
-  /**
-   * Dispose of event listeners.
-   */
   dispose() {
-    document.removeEventListener('keydown', this._onKeyDown);
-    document.removeEventListener('keyup', this._onKeyUp);
-    this.canvas.removeEventListener('mousedown', this._onMouseDown);
-    document.removeEventListener('mouseup', this._onMouseUp);
-    document.removeEventListener('mousemove', this._onMouseMove);
-    this.canvas.removeEventListener('wheel', this._onWheel);
-    this.canvas.removeEventListener('contextmenu', this._onContextMenu);
+    this.camera.fov = this.baseFOV;
+    this.camera.updateProjectionMatrix();
   }
 }

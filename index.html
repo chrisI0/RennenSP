@@ -23,9 +23,25 @@
           <div class="control-row"><kbd>RMB</kbd> <span>Look around</span></div>
           <div class="control-row"><kbd>Scroll</kbd> <span>Adjust speed</span></div>
         </div>
-        <div id="hud-speed">
-          <span id="speed-value">0.0</span>
-          <span id="speed-unit">m/s</span>
+        <div id="hud-dashboard">
+          <div id="rpm-container">
+            <div id="rpm-bar-track">
+              <div id="rpm-bar-fill"></div>
+            </div>
+            <div id="rpm-text-container">
+              <span id="rpm-value">0</span>
+              <span id="rpm-unit">rpm</span>
+            </div>
+          </div>
+          <div id="dashboard-row">
+            <div id="gear-container">
+              <span id="gear-value">1</span>
+            </div>
+            <div id="speed-container">
+              <span id="speed-value">0</span>
+              <span id="speed-unit">km/h</span>
+            </div>
+          </div>
         </div>
         <div id="hud-position">
           <span id="pos-x">X: 0.0</span>
