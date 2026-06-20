@@ -3,7 +3,7 @@ import './style.css';
 import { createGrid } from './grid.js';
 import { setupEnvironment } from './environment.js';
 import { SimVehicleCameraManager } from './camera.js';
-import { MouseSimInputManager } from './input.js';
+import { UniversalInputManager } from './input.js';
 import { SimpleRaycastVehicle } from './vehicle.js';
 
 /**
@@ -107,9 +107,9 @@ async function init() {
     minHeight:         0.8,
   });
 
-  // Mouse sim input manager (virtual steering + pedals)
-  const inputManager = new MouseSimInputManager({
-    deadzone: 0.04,
+  // Universal input manager (supports Keyboard, Mouse, and Gamepad)
+  const inputManager = new UniversalInputManager({
+    deadzone: 0.05,
     steeringSensitivity: 8,
     autoCenterKey: 'Space',
     showOverlay: true,
