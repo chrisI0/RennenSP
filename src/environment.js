@@ -49,11 +49,11 @@ function createSky() {
           color = mix(uHorizonColor, uGroundColor, t);
         }
         
-        // Sun glow
+        // Sun glow (tightened for a crisp midday sun disc)
         float sunDot = max(dot(direction, uSunDirection), 0.0);
-        float sunDisc = pow(sunDot, 800.0) * 3.0;
-        float sunGlow = pow(sunDot, 8.0) * 0.4;
-        float sunHalo = pow(sunDot, 3.0) * 0.15;
+        float sunDisc = pow(sunDot, 2000.0) * 4.0;
+        float sunGlow = pow(sunDot, 40.0) * 0.2;
+        float sunHalo = pow(sunDot, 12.0) * 0.05;
         
         color += uSunColor * (sunDisc + sunGlow + sunHalo) * uSunIntensity;
         
@@ -66,13 +66,13 @@ function createSky() {
       }
     `,
     uniforms: {
-      uTopColor: { value: new THREE.Color(0x0a0e1a) },
-      uMidColor: { value: new THREE.Color(0x141828) },
-      uHorizonColor: { value: new THREE.Color(0x1a1520) },
-      uGroundColor: { value: new THREE.Color(0x08080c) },
-      uSunDirection: { value: new THREE.Vector3(0.4, 0.15, -0.9).normalize() },
-      uSunColor: { value: new THREE.Color(0xff8844) },
-      uSunIntensity: { value: 1.2 },
+      uTopColor: { value: new THREE.Color(0x1b4f72) },      // Deep vibrant sky blue
+      uMidColor: { value: new THREE.Color(0x3498db) },      // Bright atmospheric blue
+      uHorizonColor: { value: new THREE.Color(0xd6eaf8) },  // Soft horizon haze blue
+      uGroundColor: { value: new THREE.Color(0x1c2833) },   // Neutral dark slate ground
+      uSunDirection: { value: new THREE.Vector3(0.1, 0.95, -0.2).normalize() }, // Overhead sun
+      uSunColor: { value: new THREE.Color(0xffffff) },      // Bright white sunlight
+      uSunIntensity: { value: 1.5 },
     },
     side: THREE.BackSide,
     depthWrite: false,
@@ -88,8 +88,8 @@ function createSky() {
  * @returns {THREE.DirectionalLight}
  */
 function createSunLight() {
-  const sun = new THREE.DirectionalLight(0xffeedd, 3.0);
-  sun.position.set(80, 30, -180);
+  const sun = new THREE.DirectionalLight(0xfffff0, 3.0); // Crisp daylight with gold tint
+  sun.position.set(20, 150, -40); // Matches uSunDirection
   sun.castShadow = true;
 
   // Shadow map settings
@@ -97,10 +97,12 @@ function createSunLight() {
   sun.shadow.mapSize.height = 2048;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 500;
-  sun.shadow.camera.left = -100;
-  sun.shadow.camera.right = 100;
-  sun.shadow.camera.top = 100;
-  sun.shadow.camera.bottom = -100;
+  
+  // Tightened shadow frustum for sharp vehicle shadows
+  sun.shadow.camera.left = -60;
+  sun.shadow.camera.right = 60;
+  sun.shadow.camera.top = 60;
+  sun.shadow.camera.bottom = -60;
   sun.shadow.bias = -0.0005;
 
   return sun;
@@ -112,9 +114,9 @@ function createSunLight() {
  */
 function createAmbientLight() {
   return new THREE.HemisphereLight(
-    0x8899cc, // sky color — bright blue-white for dev visibility
-    0x445566, // ground color — visible fill from below
-    2.0       // intensity — high for global illumination feel
+    0xaed6f1, // Light blue sky color
+    0x2c3e50, // Slate ground color
+    1.1       // Natural fill intensity
   );
 }
 
@@ -133,14 +135,9 @@ export function setupEnvironment(scene) {
   const ambientLight = createAmbientLight();
   scene.add(ambientLight);
 
-  // Add a subtle point light to give some local illumination interest
-  const accentLight = new THREE.PointLight(0xdd4400, 0.3, 50);
-  accentLight.position.set(0, 8, 0);
-  scene.add(accentLight);
-
   // Scene fog for depth
   // Fog disabled during development for full grid visibility
   // scene.fog = new THREE.FogExp2(0x0a0a12, 0.00015);
 
-  return { sky, sunLight, ambientLight, accentLight };
+  return { sky, sunLight, ambientLight };
 }
