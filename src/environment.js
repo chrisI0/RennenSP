@@ -10,7 +10,7 @@ import * as THREE from 'three';
  * @returns {THREE.Mesh}
  */
 function createSky() {
-  const skyGeometry = new THREE.SphereGeometry(9000, 32, 32);
+  const skyGeometry = new THREE.SphereGeometry(5000, 32, 32);
 
   const skyMaterial = new THREE.ShaderMaterial({
     vertexShader: /* glsl */ `

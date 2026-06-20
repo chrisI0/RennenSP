@@ -140,10 +140,6 @@ export class TrackGenerator {
       side: THREE.DoubleSide
     });
 
-    material.polygonOffset = true;
-    material.polygonOffsetFactor = -1;
-    material.polygonOffsetUnits = -1;
-
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -198,8 +194,8 @@ export class TrackGenerator {
         colors.push(finalColor.r, finalColor.g, finalColor.b);
       }
 
-      indices.push(vIdx + 0, vIdx + 2, vIdx + 1);
-      indices.push(vIdx + 1, vIdx + 2, vIdx + 3);
+      indices.push(vIdx + 0, vIdx + 1, vIdx + 2);
+      indices.push(vIdx + 1, vIdx + 3, vIdx + 2);
       vIdx += 4;
 
       // 2. Right Kerb Quad (from 6.0m to 6.5m, outside of track edge)
@@ -260,25 +256,31 @@ export class TrackGenerator {
     const p2 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.trackRadius).addScaledVector(tangent, -halfWidth);
     const p3 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.trackRadius).addScaledVector(tangent, halfWidth);
 
-    vertices.push(p0.x, 0.046, p0.z);
-    vertices.push(p1.x, 0.046, p1.z);
-    vertices.push(p2.x, 0.046, p2.z);
-    vertices.push(p3.x, 0.046, p3.z);
+    vertices.push(p0.x, 0.052, p0.z);
+    vertices.push(p1.x, 0.052, p1.z);
+    vertices.push(p2.x, 0.052, p2.z);
+    vertices.push(p3.x, 0.052, p3.z);
 
-    indices.push(0, 2, 1);
-    indices.push(1, 2, 3);
+    indices.push(0, 1, 2);
+    indices.push(2, 1, 3);
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
-    const material = new THREE.MeshBasicMaterial({
+    const material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
+      roughness: 0.8,
+      metalness: 0.1,
       side: THREE.DoubleSide
     });
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = -2;
+    material.polygonOffsetUnits = -2;
 
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
     return mesh;
   }
 
