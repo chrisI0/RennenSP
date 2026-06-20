@@ -176,6 +176,8 @@ async function init() {
 }
 
 function addReferenceObjects(scene) {
+  // Landmark cones commented out to keep the track clean
+  /*
   const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xdd4400, roughness: 0.6 });
   const coneGeometry = new THREE.ConeGeometry(0.3, 0.8, 8);
   const conePositions = [[3, 0, -5], [-3, 0, -5], [3, 0, -25], [-3, 0, -25]];
@@ -184,6 +186,7 @@ function addReferenceObjects(scene) {
     cone.position.set(x, y + 0.4, z);
     scene.add(cone);
   });
+  */
 }
 
 window.addEventListener('resize', () => {

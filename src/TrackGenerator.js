@@ -5,9 +5,8 @@ export class TrackGenerator {
     this.scene = scene;
     this.trackWidth = 12;
     this.trackRadius = this.trackWidth / 2;
-    this.wallRadius = 8.0; // Distance from center to the concrete barriers
+    this.wallRadius = 7.8; // Distance to the concrete safety walls
 
-    // 1. Core circuit loop points
     const trackPoints = [
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(120, 0, 0),
@@ -24,30 +23,28 @@ export class TrackGenerator {
     ];
 
     this.curve = new THREE.CatmullRomCurve3(trackPoints, true, 'centripetal');
-    this.sampledPoints = this.curve.getSpacedPoints(400); // Higher subdivisions for smoother walls
+    this.sampledPoints = this.curve.getSpacedPoints(400);
 
-    // Pre-allocated lookup tools
     this._ab = new THREE.Vector3();
     this._ap = new THREE.Vector3();
     this._outA = new THREE.Vector3();
     this._outB = new THREE.Vector3();
 
-    // 2. Generate Detailed Track Layers
-    this.roadMesh = this._buildTrackSystem();
-    this.scene.add(this.roadMesh);
+    // 1. Compile road and walls
+    this.trackSystemMesh = this._buildTrackSystem();
+    this.scene.add(this.trackSystemMesh);
 
-    // Generate Apex Kerbs
+    // 2. Generate red/white apex kerbs in turns (both inside and outside edges)
     this.kerbsMesh = this._buildApexKerbs();
-    this.scene.add(this.kerbsMesh);
+    if (this.kerbsMesh) {
+      this.scene.add(this.kerbsMesh);
+    }
 
-    // 3. Generate 3D Solid Concrete Barriers
-    this.wallMesh = this._buildConcreteWalls();
-    this.scene.add(this.wallMesh);
+    // 3. Generate FIA start/finish line
+    this.startFinishMesh = this._buildStartFinishLine();
+    this.scene.add(this.startFinishMesh);
   }
 
-  /**
-   * Compiles asphalt and clean white lines into an optimized geometry block
-   */
   _buildTrackSystem() {
     const segments = 400;
     const vertices = [];
@@ -55,7 +52,11 @@ export class TrackGenerator {
     const indices = [];
     const UP = new THREE.Vector3(0, 1, 0);
 
-    let vertexIdx = 0;
+    const asphaltColor = new THREE.Color(0x1c1d21);
+    const whiteLineColor = new THREE.Color(0xeeeeee);
+    const concreteWallColor = new THREE.Color(0xf0f0f0); // White barriers
+    
+    let vertexCount = 0;
 
     for (let i = 0; i <= segments; i++) {
       const t = i / segments;
@@ -63,47 +64,67 @@ export class TrackGenerator {
       const tangent = this.curve.getTangentAt(t).normalize();
       const sideNormal = new THREE.Vector3().crossVectors(tangent, UP).normalize();
 
-      const whiteLineColor = new THREE.Color(0xeeeeee);
-      const asphaltColor = new THREE.Color(0x18181b);
-
-      // Define cross section profile nodes across the 12m track profile
-      // [Left Track Edge, Left White Line Inner, Right White Line Inner, Right Track Edge]
-      const profileRadii = [
-        -this.trackRadius,       // 0: Left Track Edge
-        -this.trackRadius + 0.15,// 1: Left White Line Inner
-        this.trackRadius - 0.15, // 2: Right White Line Inner
-        this.trackRadius,        // 3: Right Track Edge
+      const offsets = [
+        -8.0, -8.0, -8.4, -8.4, // Left Wall Loop Profile
+        -this.trackRadius - 0.15, -this.trackRadius, 
+        this.trackRadius, this.trackRadius + 0.15,
+        8.0, 8.0, 8.4, 8.4      // Right Wall Loop Profile
       ];
 
-      const currentStripPositions = profileRadii.map(r => 
-        new THREE.Vector3().copy(pos).addScaledVector(sideNormal, r)
-      );
-
-      // Push vertices and assign colors per point profile
-      currentStripPositions.forEach((pt, idx) => {
-        let yOffset = 0.04;
-        let finalColor = asphaltColor;
-
-        if (idx === 0 || idx === 3) {
-          finalColor = whiteLineColor; // White lines
-          yOffset = 0.05;
+      offsets.forEach((offset, idx) => {
+        const pt = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, offset);
+        
+        let y = 0.04; // Asphalt center baseline
+        if (idx === 1 || idx === 2 || idx === 9 || idx === 10) {
+          y = 1.2; // Top of the 3D safety wall barrier blocks
+        } else if (idx === 0 || idx === 3 || idx === 8 || idx === 11) {
+          y = 0.0; // Foundation floor anchor of the walls
+        } else if (idx === 4 || idx === 7) {
+          y = 0.05; // Crisp White lines elevated above asphalt (0.04m)
         }
 
-        vertices.push(pt.x, yOffset, pt.z);
+        vertices.push(pt.x, y, pt.z);
+
+        // Color logic
+        let finalColor = asphaltColor;
+        if (idx === 0 || idx === 1 || idx === 2 || idx === 3) {
+          finalColor = concreteWallColor; // Left 3D Barrier Wall (White)
+        } else if (idx === 8 || idx === 9 || idx === 10 || idx === 11) {
+          finalColor = concreteWallColor; // Right 3D Barrier Wall (White)
+        } else if (idx === 4 || idx === 7) {
+          finalColor = whiteLineColor;    // Edge Boundary Side Lines (Crisp White)
+        } else {
+          finalColor = asphaltColor;      // Asphalt core
+        }
+
         colors.push(finalColor.r, finalColor.g, finalColor.b);
       });
 
-      // Map triangles between this step loop and the next step loop
       if (i < segments) {
-        const row = vertexIdx;
-        const nextRow = vertexIdx + 4;
+        const r = vertexCount;
+        const n = vertexCount + 12;
 
-        for (let col = 0; col < 3; col++) {
-          indices.push(row + col, row + col + 1, nextRow + col);
-          indices.push(row + col + 1, nextRow + col + 1, nextRow + col);
-        }
+        // Bridge the 3D Left Wall solid box panels
+        indices.push(r+0, r+1, n+0); indices.push(r+1, n+1, n+0); // Inside face
+        indices.push(r+1, r+2, n+1); indices.push(r+2, n+2, n+1); // Top face
+        indices.push(r+2, r+3, n+2); indices.push(r+3, n+3, n+2); // Outside face
+
+        // Bridge Left White Line panel strip (from 4 to 5)
+        indices.push(r+4, r+5, n+4); indices.push(r+5, n+5, n+4);
+
+        // Bridge Main Asphalt Core driving lane tracks (from 5 to 6)
+        indices.push(r+5, r+6, n+5); indices.push(r+6, n+6, n+5);
+
+        // Bridge Right White Line panel strip (from 6 to 7)
+        indices.push(r+6, r+7, n+6); indices.push(r+7, n+7, n+6);
+
+        // Bridge the 3D Right Wall solid box panels
+        indices.push(r+8, r+9, n+8); indices.push(r+9, n+9, n+8);   // Inside face
+        indices.push(r+9, r+10, n+9); indices.push(r+10, n+10, n+9); // Top face
+        indices.push(r+10, r+11, n+10); indices.push(r+11, n+11, n+10); // Outside face
       }
-      vertexIdx += 4;
+
+      vertexCount += 12;
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -114,17 +135,21 @@ export class TrackGenerator {
 
     const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.85,
+      roughness: 0.75,
       metalness: 0.1,
       side: THREE.DoubleSide
     });
 
-    return new THREE.Mesh(geometry, material);
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = -1;
+    material.polygonOffsetUnits = -1;
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
   }
 
-  /**
-   * Generates separate rectangular quad steps for alternating apex kerbs
-   */
   _buildApexKerbs() {
     const segments = 400;
     const vertices = [];
@@ -138,8 +163,8 @@ export class TrackGenerator {
     let vIdx = 0;
 
     for (let i = 0; i < segments; i++) {
-      // Curve zones (segments 40-110 and 150-280)
-      const isKerbSegment = (i >= 40 && i < 110) || (i >= 150 && i < 280);
+      // Curve zones (segments 35-115 and 145-285)
+      const isKerbSegment = (i >= 35 && i < 115) || (i >= 145 && i < 285);
       if (!isKerbSegment) continue;
 
       const t0 = i / segments;
@@ -154,17 +179,16 @@ export class TrackGenerator {
       const sideNormal0 = new THREE.Vector3().crossVectors(tangent0, UP).normalize();
       const sideNormal1 = new THREE.Vector3().crossVectors(tangent1, UP).normalize();
 
-      // Determine quad color: Math.floor(i / 2) % 2 === 0 -> red, else white
+      // Determine color pattern (alternating pure blocks)
       const isRed = (Math.floor(i / 2) % 2 === 0);
       const finalColor = isRed ? redColor : whiteColor;
 
-      // 1. Left Kerb Quad (from -6.6m to -6.0m)
+      // 1. Left Kerb Quad (from -6.5m to -6.0m, outside of track edge)
       const leftInner0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -6.0);
-      const leftOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -6.6);
+      const leftOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -6.5);
       const leftInner1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -6.0);
-      const leftOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -6.6);
+      const leftOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -6.5);
 
-      // Height offset 0.051m to prevent Z-fighting
       vertices.push(leftInner0.x, 0.051, leftInner0.z);
       vertices.push(leftOuter0.x, 0.051, leftOuter0.z);
       vertices.push(leftInner1.x, 0.051, leftInner1.z);
@@ -178,11 +202,11 @@ export class TrackGenerator {
       indices.push(vIdx + 1, vIdx + 2, vIdx + 3);
       vIdx += 4;
 
-      // 2. Right Kerb Quad (from 6.0m to 6.6m)
+      // 2. Right Kerb Quad (from 6.0m to 6.5m, outside of track edge)
       const rightInner0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 6.0);
-      const rightOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 6.6);
+      const rightOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 6.5);
       const rightInner1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 6.0);
-      const rightOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 6.6);
+      const rightOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 6.5);
 
       vertices.push(rightInner0.x, 0.051, rightInner0.z);
       vertices.push(rightOuter0.x, 0.051, rightOuter0.z);
@@ -197,6 +221,8 @@ export class TrackGenerator {
       indices.push(vIdx + 1, vIdx + 3, vIdx + 2);
       vIdx += 4;
     }
+
+    if (vertices.length === 0) return null;
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
@@ -216,80 +242,43 @@ export class TrackGenerator {
     return mesh;
   }
 
-  /**
-   * Generates solid continuous 3D walls running along the perimeter
-   */
-  _buildConcreteWalls() {
+  _buildStartFinishLine() {
+    const targetSegment = 5;
     const segments = 400;
+    const t = targetSegment / segments;
+    const pos = this.curve.getPointAt(t);
+    const tangent = this.curve.getTangentAt(t).normalize();
+    const UP = new THREE.Vector3(0, 1, 0);
+    const sideNormal = new THREE.Vector3().crossVectors(tangent, UP).normalize();
+
+    const halfWidth = 0.30; // 0.60m total width (FIA regulation)
     const vertices = [];
     const indices = [];
-    const UP = new THREE.Vector3(0, 1, 0);
-    const wallHeight = 1.2;
-    const halfThickness = 0.2;
 
-    let vIdx = 0;
+    const p0 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, -this.trackRadius).addScaledVector(tangent, -halfWidth);
+    const p1 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, -this.trackRadius).addScaledVector(tangent, halfWidth);
+    const p2 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.trackRadius).addScaledVector(tangent, -halfWidth);
+    const p3 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.trackRadius).addScaledVector(tangent, halfWidth);
 
-    for (let i = 0; i <= segments; i++) {
-      const t = i / segments;
-      const pos = this.curve.getPointAt(t);
-      const tangent = this.curve.getTangentAt(t).normalize();
-      const sideNormal = new THREE.Vector3().crossVectors(tangent, UP).normalize();
+    vertices.push(p0.x, 0.046, p0.z);
+    vertices.push(p1.x, 0.046, p1.z);
+    vertices.push(p2.x, 0.046, p2.z);
+    vertices.push(p3.x, 0.046, p3.z);
 
-      // Inner Base (-0.2m relative to wallRadius)
-      const p0 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.wallRadius - halfThickness);
-      // Inner Top
-      const p1 = new THREE.Vector3().copy(p0);
-      p1.y = wallHeight;
-      // Outer Top (+0.2m thickness)
-      const p2 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.wallRadius + halfThickness);
-      p2.y = wallHeight;
-      // Outer Base
-      const p3 = new THREE.Vector3().copy(p2);
-      p3.y = 0;
-
-      vertices.push(p0.x, 0, p0.z);
-      vertices.push(p1.x, p1.y, p1.z);
-      vertices.push(p2.x, p2.y, p2.z);
-      vertices.push(p3.x, 0, p3.z);
-
-      if (i < segments) {
-        const r = vIdx;
-        const n = vIdx + 4;
-
-        // Inner Face (r0, r1, n0, n1)
-        indices.push(r + 0, n + 0, n + 1);
-        indices.push(r + 0, n + 1, r + 1);
-
-        // Top Face (r1, r2, n1, n2)
-        indices.push(r + 1, n + 1, n + 2);
-        indices.push(r + 1, n + 2, r + 2);
-
-        // Outer Face (r2, r3, n2, n3)
-        indices.push(r + 2, n + 2, n + 3);
-        indices.push(r + 2, n + 3, r + 3);
-
-        // Bottom Face (r3, r0, n3, n0)
-        indices.push(r + 3, n + 3, n + 0);
-        indices.push(r + 3, n + 0, r + 0);
-      }
-      vIdx += 4;
-    }
+    indices.push(0, 2, 1);
+    indices.push(1, 2, 3);
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xf0f0f0, // Crisp, matte regulatory white
-      roughness: 0.7,
-      metalness: 0.1,
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      side: THREE.DoubleSide
     });
-    material.side = THREE.DoubleSide;
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
     return mesh;
   }
 
