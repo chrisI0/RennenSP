@@ -88,6 +88,7 @@ export class SimpleRaycastVehicle {
     this.maxRPM = 15000;
     this.shiftUpRPM = 14200;
     this.shiftDownRPM = 4500;
+    this.isOffTrack = false;
 
     // ── Steering & tires ──────────────────────────────────
     this.maxSteerAngle      = Math.PI / 6;  // 30°
@@ -361,6 +362,9 @@ export class SimpleRaycastVehicle {
         let gearEffect = Math.abs(this.gearRatios[this.currentGear]) / 3.0;
 
         let thrust = thrustInput * this.engineForce * 0.5 * gearEffect;
+        if (this.isOffTrack) {
+          thrust *= 0.4;
+        }
 
         // Determine direction of thrust based on gear (Reverse or Forward)
         let thrustDir = this.currentGear === -1 ? -1 : 1;
@@ -458,6 +462,11 @@ export class SimpleRaycastVehicle {
     this.angularVelocity.x += (this._totalTorque.x / this._inertia.x) * dt;
     this.angularVelocity.y += (this._totalTorque.y / this._inertia.y) * dt;
     this.angularVelocity.z += (this._totalTorque.z / this._inertia.z) * dt;
+
+    // Apply yaw wiggle off-track when moving
+    if (this.isOffTrack && speed > 1.0) {
+      this.angularVelocity.y += (Math.random() - 0.5) * 1.5 * dt;
+    }
 
     // Angular damping
     const damp = 1 - this.angularDamping * dt;

@@ -25,3 +25,7 @@ dist-ssr
 
 # Environment variables
 .env
+
+# OS metadata
+desktop.ini
+Thumbs.db
