@@ -110,12 +110,36 @@ async function init() {
 
     inputManager.update(dt);
 
-    // Track Distance Penalty Check (Fully, safely commented out for immediate world rendering diagnostics)
+    // ========================================================
+    // 🏁 TRACK DISTANCE & HARD WALL COLLISION MANAGMENT
+    // ========================================================
     if (trackCurve && trackGenerator && vehicle && vehicle.mesh) {
       carPos.copy(vehicle.mesh.position);
+      
+      // Calculate zero-allocation squared distance to track center spline
       const trackDistanceSq = trackGenerator.findClosestPointToPoint(carPos, closestPoint);
+      
+      // 1. Off-Track Traction Friction Penalty (6 meters squared is 36.0)
       vehicle.isOffTrack = (trackDistanceSq > 36.0);
-      vehicle.maxAccelerationScale = vehicle.isOffTrack ? 0.4 : 1.0;
+      vehicle.maxAccelerationScale = vehicle.isOffTrack ? 0.35 : 1.0;
+
+      // 2. Solid Outer Concrete Wall Collision Check (Wall sits at 8.0m, checking at 6.8m threshold)
+      if (trackDistanceSq >= 46.24) {
+        // Calculate the push-back normal direction pointing inward toward the track center
+        const pushDirection = new THREE.Vector3().subVectors(closestPoint, carPos).normalize();
+        pushDirection.y = 0; // Lock to ground horizon coordinate plane
+
+        // Mathematically snap the vehicle mesh position back to exactly 6.7 meters from the center spline
+        vehicle.mesh.position.copy(closestPoint).addScaledVector(pushDirection, -6.7);
+        
+        // Reflect only the normal velocity component pointing toward the wall with a minor 0.1 scale dampening factor
+        if (vehicle.velocity) {
+          const dot = vehicle.velocity.dot(pushDirection);
+          if (dot < 0) {
+            vehicle.velocity.addScaledVector(pushDirection, -1.1 * dot);
+          }
+        }
+      }
     }
 
     vehicle.update(dt, inputManager);
