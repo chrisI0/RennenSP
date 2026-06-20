@@ -319,11 +319,11 @@ export class UniversalInputManager {
 
     const throttleWrap = this._createVerticalBar('T', '#22c55e', 'msim-throttle');
     this._throttleFill = throttleWrap.querySelector('.msim-bar-fill');
-    this._throttleLabel = throttleWrap.querySelector('.msim-bar-label');
+    this._throttleValSpan = throttleWrap.querySelector('.msim-bar-val');
 
     const brakeWrap = this._createVerticalBar('B', '#ef4444', 'msim-brake');
     this._brakeFill = brakeWrap.querySelector('.msim-bar-fill');
-    this._brakeLabel = brakeWrap.querySelector('.msim-bar-label');
+    this._brakeValSpan = brakeWrap.querySelector('.msim-bar-val');
 
     pedalsContainer.appendChild(throttleWrap);
     pedalsContainer.appendChild(brakeWrap);
@@ -406,15 +406,46 @@ export class UniversalInputManager {
     steerBarOuter.appendChild(steerFillRight);
     this._steerFillRight = steerFillRight;
 
+    // Pinned Steering Label spans to prevent layout shifting
     const steerLabel = document.createElement('div');
     steerLabel.style.cssText = `
       font-size: 10px;
       color: rgba(255, 255, 255, 0.5);
       letter-spacing: 0.05em;
-      text-align: center;
+      display: flex;
+      justify-content: center;
       width: 100%;
+      gap: 4px;
     `;
-    steerLabel.textContent = 'STR      0%';
+
+    const steerPrefix = document.createElement('span');
+    steerPrefix.style.cssText = `
+      width: 28px;
+      text-align: left;
+    `;
+    steerPrefix.textContent = 'STR';
+
+    const steerDir = document.createElement('span');
+    steerDir.style.cssText = `
+      width: 10px;
+      text-align: center;
+      color: #f59e0b;
+      font-weight: bold;
+    `;
+    steerDir.innerHTML = '&nbsp;'; // default 1-char space
+    this._steerDirSpan = steerDir;
+
+    const steerVal = document.createElement('span');
+    steerVal.style.cssText = `
+      width: 32px;
+      text-align: right;
+    `;
+    steerVal.textContent = '0%';
+    this._steerValSpan = steerVal;
+
+    steerLabel.appendChild(steerPrefix);
+    steerLabel.appendChild(steerDir);
+    steerLabel.appendChild(steerVal);
     this._steerLabel = steerLabel;
 
     steerWrap.appendChild(steerBarOuter);
@@ -434,7 +465,7 @@ export class UniversalInputManager {
       flex-direction: column;
       align-items: center;
       gap: 4px;
-      width: 48px; /* Fixed width to prevent horizontal shifting when labels change length */
+      width: 48px; /* Fixed width container */
     `;
 
     const barOuter = document.createElement('div');
@@ -468,10 +499,29 @@ export class UniversalInputManager {
       font-size: 9px;
       color: rgba(255, 255, 255, 0.4);
       letter-spacing: 0.05em;
-      text-align: center;
+      display: flex;
+      justify-content: space-between;
       width: 100%;
+      padding: 0 4px;
+      box-sizing: border-box;
     `;
-    label.textContent = `${letter}   0%`;
+
+    const spanLetter = document.createElement('span');
+    spanLetter.style.cssText = `
+      text-align: left;
+    `;
+    spanLetter.textContent = letter;
+
+    const spanVal = document.createElement('span');
+    spanVal.className = 'msim-bar-val';
+    spanVal.style.cssText = `
+      text-align: right;
+      width: 28px; /* Fixed width for value portion */
+    `;
+    spanVal.textContent = '0%';
+
+    label.appendChild(spanLetter);
+    label.appendChild(spanVal);
 
     wrap.appendChild(barOuter);
     wrap.appendChild(label);
@@ -502,30 +552,33 @@ export class UniversalInputManager {
       this._steerFillLeft.style.width = '0%';
       this._steerFillRight.style.width = `${steerPct * 0.5}%`;
     }
-    const steerRounded = Math.abs(steerPct) | 0;
+    const steerRounded = Math.round(Math.abs(steerPct));
 
-    // Constant length formatting (exactly 10 chars) to prevent horizontal shifting
-    let steerStr = '';
+    // Update steering elements inside pinned spans
     if (this.steering < -0.01) {
-      steerStr = `STR L ${String(steerRounded).padStart(3, ' ')}%`;
+      this._steerDirSpan.textContent = 'L';
+      this._steerValSpan.textContent = `${steerRounded}%`;
     } else if (this.steering > 0.01) {
-      steerStr = `STR R ${String(steerRounded).padStart(3, ' ')}%`;
+      this._steerDirSpan.textContent = 'R';
+      this._steerValSpan.textContent = `${steerRounded}%`;
     } else {
-      steerStr = `STR      0%`;
+      this._steerDirSpan.innerHTML = '&nbsp;'; // 1-character space
+      this._steerValSpan.textContent = '0%';
     }
-    this._steerLabel.textContent = steerStr;
 
     // ── 3. Throttle Bar ──
     const throttlePct = (this.throttle * 100) | 0;
     this._throttleFill.style.height = `${throttlePct}%`;
-    // Constant length formatting (exactly 6 chars) to prevent horizontal shifting
-    this._throttleLabel.textContent = `T ${String(throttlePct).padStart(3, ' ')}%`;
+    if (this._throttleValSpan) {
+      this._throttleValSpan.textContent = `${throttlePct}%`;
+    }
 
     // ── 4. Brake Bar ──
     const brakePct = (this.brake * 100) | 0;
     this._brakeFill.style.height = `${brakePct}%`;
-    // Constant length formatting (exactly 6 chars) to prevent horizontal shifting
-    this._brakeLabel.textContent = `B ${String(brakePct).padStart(3, ' ')}%`;
+    if (this._brakeValSpan) {
+      this._brakeValSpan.textContent = `${brakePct}%`;
+    }
   }
 
   // ================================================================
