@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 
 export class TrackGenerator {
-  constructor(scene) {
+  constructor(scene, trackConfig = {}) {
     this.scene = scene;
-    this.trackWidth = 12;
+    this.trackWidth = trackConfig.trackWidth || 12;
     this.trackRadius = this.trackWidth / 2;
-    this.wallRadius = 7.8; // Distance to the concrete safety walls
+    this.wallRadius = trackConfig.wallRadius || 7.8; // Distance to the concrete safety walls
 
-    const trackPoints = [
+    const trackPoints = trackConfig.points || [
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(120, 0, 0),
       new THREE.Vector3(260, 0, 50),
@@ -21,6 +21,13 @@ export class TrackGenerator {
       new THREE.Vector3(-100, 0, 80),
       new THREE.Vector3(-180, 0, 20),
     ];
+
+    this.kerbZones = trackConfig.kerbZones || [
+      { start: 35, end: 115 },
+      { start: 145, end: 285 }
+    ];
+
+    this.startLineSegment = trackConfig.startLineSegment !== undefined ? trackConfig.startLineSegment : 5;
 
     this.curve = new THREE.CatmullRomCurve3(trackPoints, true, 'centripetal');
     this.sampledPoints = this.curve.getSpacedPoints(400);
@@ -159,8 +166,8 @@ export class TrackGenerator {
     let vIdx = 0;
 
     for (let i = 0; i < segments; i++) {
-      // Curve zones (segments 35-115 and 145-285)
-      const isKerbSegment = (i >= 35 && i < 115) || (i >= 145 && i < 285);
+      // Curve zones from dynamic configuration
+      const isKerbSegment = this.kerbZones.some(zone => i >= zone.start && i < zone.end);
       if (!isKerbSegment) continue;
 
       const t0 = i / segments;
@@ -239,7 +246,7 @@ export class TrackGenerator {
   }
 
   _buildStartFinishLine() {
-    const targetSegment = 5;
+    const targetSegment = this.startLineSegment;
     const segments = 400;
     const t = targetSegment / segments;
     const pos = this.curve.getPointAt(t);
@@ -322,3 +329,34 @@ export class TrackGenerator {
     return p.distanceToSquared(out);
   }
 }
+
+/**
+ * ============================================================================
+ * 🏁 INITIALIZATION REFERENCE FOR main.js
+ * ============================================================================
+ * To load custom tracks dynamically, instantiate TrackGenerator with a config
+ * map as shown in this example:
+ *
+ * import { TrackGenerator } from './TrackGenerator.js';
+ *
+ * const customTrackConfig = {
+ *   trackWidth: 14,      // Total track width in meters
+ *   wallRadius: 9.0,     // Distance to the safety barriers in meters
+ *   startLineSegment: 8, // Index of segment where start/finish line is drawn
+ *   points: [            // Custom 3D coordinates defining the spline path
+ *     new THREE.Vector3(0, 0, 0),
+ *     new THREE.Vector3(150, 0, 20),
+ *     new THREE.Vector3(250, 0, 100),
+ *     new THREE.Vector3(200, 0, 220),
+ *     new THREE.Vector3(50, 0, 180),
+ *     new THREE.Vector3(-100, 0, 50)
+ *   ],
+ *   kerbZones: [         // Segments where rumble kerbs will generate
+ *     { start: 20, end: 60 },
+ *     { start: 120, end: 180 }
+ *   ]
+ * };
+ *
+ * // Instantiate with the configuration map:
+ * const trackGenerator = new TrackGenerator(scene, customTrackConfig);
+ */
