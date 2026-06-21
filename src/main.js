@@ -13,8 +13,6 @@ let trackCurve; // Global variable reference for the spline trajectory curve
 
 // DOM elements
 const canvas = document.getElementById('render-canvas');
-const loadingScreen = document.getElementById('loading-screen');
-const loaderFill = document.getElementById('loader-fill');
 const hudOverlay = document.getElementById('hud-overlay');
 const speedValue = document.getElementById('speed-value');
 const posX = document.getElementById('pos-x');
@@ -44,22 +42,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 6000);
 camera.position.set(0, 5, 10);
 
-let loadProgress = 0;
-function simulateLoading() {
-  return new Promise((resolve) => {
-    const interval = setInterval(() => {
-      loadProgress += Math.random() * 15 + 5;
-      if (loadProgress >= 100) {
-        loadProgress = 100;
-        loaderFill.style.width = '100%';
-        clearInterval(interval);
-        setTimeout(resolve, 300);
-      } else {
-        loaderFill.style.width = `${loadProgress}%`;
-      }
-    }, 120);
-  });
-}
+
 
 async function init() {
   setupEnvironment(scene);
@@ -147,9 +130,13 @@ async function init() {
     console.error("Critical Failure running asset data pipeline: ", error);
   }
 
-  await simulateLoading();
   await trackLoadPromise;
-  loadingScreen.classList.add('hidden');
+
+  // Hide the game loader overlay once fully loaded
+  const gameLoader = document.getElementById('game-loader-screen');
+  if (gameLoader) {
+    gameLoader.style.display = 'none';
+  }
   hudOverlay.classList.add('visible');
 
   const clock = new THREE.Clock();

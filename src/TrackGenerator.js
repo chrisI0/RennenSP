@@ -70,9 +70,9 @@ export class TrackGenerator {
     loader.load(TRACK_URL, (gltf) => {
       this.trackMesh = gltf.scene;
       
-      const loaderText = document.querySelector('.loader-text');
-      if (loaderText) {
-        loaderText.textContent = "Unpacking and configuring 3D environment...";
+      const statusText = document.getElementById('loading-status-text');
+      if (statusText) {
+        statusText.textContent = "Unpacking and configuring 3D environment...";
       }
       
       this.scene.add(this.trackMesh);
@@ -82,16 +82,28 @@ export class TrackGenerator {
       setTimeout(() => {
         console.log("3D Environment model loaded successfully!");
         
+        if (statusText) {
+          statusText.textContent = "Loading complete! Press any key or click to start.";
+        }
+        const progressBar = document.getElementById('loading-progress-bar');
+        if (progressBar) {
+          progressBar.style.width = '100%';
+        }
+        
         // Trigger callback so main.js knows the map is ready
         if (onLoadCallback) onLoadCallback(gltf);
       }, 100);
     }, 
     (xhr) => {
       if (xhr.total) {
-        const percent = Math.min((xhr.loaded / xhr.total) * 100, 99);
-        const loaderFill = document.getElementById('loader-fill');
-        if (loaderFill) {
-          loaderFill.style.width = `${percent}%`;
+        const percent = (xhr.loaded / xhr.total) * 100;
+        const progressBar = document.getElementById('loading-progress-bar');
+        if (progressBar) {
+          progressBar.style.width = `${percent.toFixed(0)}%`;
+        }
+        const statusText = document.getElementById('loading-status-text');
+        if (statusText) {
+          statusText.textContent = `Downloading track assets: ${percent.toFixed(0)}% (${(xhr.loaded / 1024 / 1024).toFixed(1)} MB / ${(xhr.total / 1024 / 1024).toFixed(1)} MB)`;
         }
       }
     },
