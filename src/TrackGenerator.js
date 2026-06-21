@@ -166,7 +166,7 @@ export class TrackGenerator {
         console.log("3D Environment model loaded successfully!");
         
         if (statusText) {
-          statusText.textContent = "Loading complete! Press any key or click to start.";
+          statusText.textContent = "Loading complete. Starting game...";
         }
         const progressBar = document.getElementById('loading-progress-bar');
         if (progressBar) {

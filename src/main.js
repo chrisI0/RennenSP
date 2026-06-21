@@ -132,6 +132,11 @@ async function init() {
 
   await trackLoadPromise;
 
+  // Wake up physics/gravity automatically on load (bypassing click/key start screen requirements)
+  if (vehicle) {
+    vehicle.gravityEnabled = true;
+  }
+
   // Set the vehicle Y position to the exact ground height + chassis offset on load
   if (vehicle && trackGenerator) {
     const startGroundY = vehicle.getGroundHeight(vehicle.position, trackGenerator);
