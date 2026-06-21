@@ -74,6 +74,21 @@ export class TrackGenerator {
       if (statusText) {
         statusText.textContent = "Unpacking and configuring 3D environment...";
       }
+
+      // Cache the road mesh node to enable high-speed visual-to-physics alignment
+      this.roadMesh = null;
+      gltf.scene.traverse((node) => {
+        if (node.isMesh && node.name.toUpperCase().includes("ROAD")) {
+          this.roadMesh = node;
+        }
+      });
+      if (!this.roadMesh) {
+        gltf.scene.traverse((node) => {
+          if (node.isMesh && !this.roadMesh) {
+            this.roadMesh = node;
+          }
+        });
+      }
       
       this.scene.add(this.trackMesh);
       this.trackMesh.updateMatrixWorld(true);

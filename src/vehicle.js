@@ -143,6 +143,11 @@ export class SimpleRaycastVehicle {
     // Track surface elevation scratch point
     this._scratchTrackPoint = new THREE.Vector3();
 
+    // Pre-allocated components for high-speed road mesh raycasting
+    this._groundRaycaster = new THREE.Raycaster();
+    this._groundRayOrigin = new THREE.Vector3();
+    this._groundRayDir = new THREE.Vector3(0, -1, 0);
+
     // ── Build Three.js mesh ───────────────────────────────
     this._buildMesh();
   }
@@ -292,32 +297,8 @@ export class SimpleRaycastVehicle {
         this._wasInGhostMode = false;
 
         // Perform downward raycast to find the exact track height directly underneath
-        let targetGroundY = this.position.y;
-        let groundFound = false;
-
-        if (trackGenerator && trackGenerator.trackMesh) {
-          const raycaster = new THREE.Raycaster();
-          const rayOrigin = new THREE.Vector3(this.position.x, this.position.y + 10, this.position.z);
-          const rayDirection = new THREE.Vector3(0, -1, 0);
-          raycaster.set(rayOrigin, rayDirection);
-          const intersects = raycaster.intersectObjects([trackGenerator.trackMesh], true);
-          if (intersects.length > 0) {
-            targetGroundY = intersects[0].point.y;
-            groundFound = true;
-          }
-        }
-
-        if (!groundFound && trackGenerator) {
-          // Fallback to spline height
-          trackGenerator.findClosestPointToPoint(this.position, this._scratchTrackPoint);
-          targetGroundY = this._scratchTrackPoint.y;
-          groundFound = true;
-        }
-
-        // Warp position to 50cm above the ground surface to prevent clipping/lag
-        if (groundFound) {
-          this.position.y = targetGroundY + 0.5;
-        }
+        const targetGroundY = this.getGroundHeight(this.position, trackGenerator);
+        this.position.y = targetGroundY + 0.5;
 
         // Reset all velocities, forces, and moments
         if (this.physicsBody) {
@@ -410,11 +391,7 @@ export class SimpleRaycastVehicle {
       r.subVectors(wp, this.position);
 
       // ── Raycast toward track surface ────────────────────
-      let groundHeight = 0;
-      if (trackGenerator) {
-        trackGenerator.findClosestPointToPoint(wp, this._scratchTrackPoint);
-        groundHeight = this._scratchTrackPoint.y;
-      }
+      const groundHeight = this.getGroundHeight(wp, trackGenerator);
       const distToGround = wp.y - groundHeight;
 
       if (distToGround >= this.suspensionRestLength) {
@@ -619,11 +596,7 @@ export class SimpleRaycastVehicle {
     // ────────────────────────────────────────────────────────
     //  GROUND CONSTRAINT
     // ────────────────────────────────────────────────────────
-    let trackElevation = 0;
-    if (trackGenerator) {
-      trackGenerator.findClosestPointToPoint(this.position, this._scratchTrackPoint);
-      trackElevation = this._scratchTrackPoint.y;
-    }
+    const trackElevation = this.getGroundHeight(this.position, trackGenerator);
     const minY = trackElevation + this.chassisHeight * 0.5;
     if (this.position.y < minY) {
       this.position.y = minY;
@@ -712,5 +685,30 @@ export class SimpleRaycastVehicle {
     });
 
     this.mesh = null;
+  }
+
+  /**
+   * Calculate exact road surface height using fast raycasting against the cached road mesh.
+   * Falls back to spline calculation if off-track or during loading.
+   *
+   * @param {THREE.Vector3} pos
+   * @param {object} [trackGenerator]
+   * @returns {number}
+   */
+  getGroundHeight(pos, trackGenerator) {
+    if (trackGenerator && trackGenerator.roadMesh) {
+      this._groundRayOrigin.set(pos.x, pos.y + 10, pos.z);
+      this._groundRaycaster.set(this._groundRayOrigin, this._groundRayDir);
+      const intersects = this._groundRaycaster.intersectObject(trackGenerator.roadMesh, true);
+      if (intersects.length > 0) {
+        return intersects[0].point.y;
+      }
+    }
+    // Fallback to spline height
+    if (trackGenerator) {
+      trackGenerator.findClosestPointToPoint(pos, this._scratchTrackPoint);
+      return this._scratchTrackPoint.y;
+    }
+    return 0;
   }
 }
