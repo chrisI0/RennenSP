@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import './style.css';
-import { createGrid } from './grid.js';
 import { setupEnvironment } from './environment.js';
 import { SimVehicleCameraManager } from './camera.js';
 import { UniversalInputManager } from './input.js';
@@ -10,6 +9,7 @@ import { TrackGenerator } from './TrackGenerator.js';
 // Global variables accessible everywhere
 let vehicle;
 let trackGenerator;
+let trackCurve; // Global variable reference for the spline trajectory curve
 
 // DOM elements
 const canvas = document.getElementById('render-canvas');
@@ -18,6 +18,7 @@ const loaderFill = document.getElementById('loader-fill');
 const hudOverlay = document.getElementById('hud-overlay');
 const speedValue = document.getElementById('speed-value');
 const posX = document.getElementById('pos-x');
+const posY = document.getElementById('pos-y');
 const posZ = document.getElementById('pos-z');
 
 const hudDashboard = document.getElementById('hud-dashboard');
@@ -61,20 +62,11 @@ function simulateLoading() {
 }
 
 async function init() {
-  const grid = createGrid();
-  scene.add(grid);
-
   setupEnvironment(scene);
 
-  // Initialize track generator globally without a local 'const'
-  trackGenerator = new TrackGenerator(scene);
-  const trackCurve = trackGenerator.curve;
-
-  addReferenceObjects(scene);
-
   const cameraManager = new SimVehicleCameraManager(camera, {
-    followDistance: 6.0,
-    followHeight: 2.2,
+    followDistance: 8.0,
+    followHeight: 3.5,
     lookAheadDistance: 1.5,
     positionSmoothing: 5.0,
     lookAtSmoothing: 5.0,
@@ -87,22 +79,86 @@ async function init() {
   const inputManager = new UniversalInputManager({
     deadzone: 0.05,
     steeringSensitivity: 8,
-    autoCenterKey: 'Space',
+    autoCenterKey: 'KeyC',
     showOverlay: true,
   });
 
-  // Assign instance to global variable cleanly
-  vehicle = new SimpleRaycastVehicle(scene, new THREE.Vector3(0, 2, 0));
-  vehicle.orientation.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
-  vehicle.mesh.quaternion.copy(vehicle.orientation);
+  // ========================================================
+  // 📥 LOCAL CONFIGURATION & ASSET PIPELINE LOADER
+  // ========================================================
+  const trackConfig = {
+    name: "Red Bull Ring",
+    spawnPoint: { x: 0, y: 0, z: 0 } // This will be overwritten by our road mesh detector
+  };
+
+  let trackLoadPromise = Promise.resolve();
+  try {
+    trackLoadPromise = new Promise((resolve) => {
+      trackGenerator = new TrackGenerator(scene, '/redbull_ring.glb', resolve);
+    });
+    trackCurve = trackGenerator.curve;
+    console.log("Successfully loaded local circuit configuration: " + trackConfig.name);
+
+    // 🏎️ SPAWN CAR SAFELY ON THE REAL ASYNCHRONOUS TRACK CORE LINE
+    const REVENUE_SPAWN = { x: 432.6, y: -41.2, z: 160.1 };
+    
+    // Find closest t on the trackCurve
+    const testPoint = new THREE.Vector3(REVENUE_SPAWN.x, REVENUE_SPAWN.y, REVENUE_SPAWN.z);
+    let minD2 = Infinity;
+    let closestT = 0;
+    for (let i = 0; i <= 1000; i++) {
+      const t = i / 1000;
+      const pt = trackCurve.getPointAt(t);
+      const d2 = pt.distanceToSquared(testPoint);
+      if (d2 < minD2) {
+        minD2 = d2;
+        closestT = t;
+      }
+    }
+
+    const spawnPoint = trackCurve.getPointAt(closestT);
+    const nextT = (closestT + 0.005) % 1.0;
+    const nextPoint = trackCurve.getPointAt(nextT);
+    const direction = new THREE.Vector3().subVectors(nextPoint, spawnPoint).normalize();
+    
+    vehicle = new SimpleRaycastVehicle(scene, new THREE.Vector3(REVENUE_SPAWN.x, REVENUE_SPAWN.y + 2.0, REVENUE_SPAWN.z));
+    window.vehicle = vehicle;
+    
+    const headingAngle = Math.atan2(direction.x, direction.z);
+    vehicle.orientation.setFromAxisAngle(new THREE.Vector3(0, 1, 0), headingAngle);
+    vehicle.mesh.quaternion.copy(vehicle.orientation);
+    if (vehicle.velocity) vehicle.velocity.set(0, 0, 0);
+
+    // Wake up physics / gravity on user interaction
+    const wakePhysics = (e) => {
+      if (vehicle && !vehicle.gravityEnabled) {
+        if (e && e.type === 'keydown') {
+          if (e.code === 'Space' || e.code === 'ControlLeft' || e.code === 'KeyG') {
+            return;
+          }
+        }
+        vehicle.gravityEnabled = true;
+      }
+    };
+    window.addEventListener('keydown', wakePhysics);
+    window.addEventListener('mousedown', wakePhysics);
+
+  } catch (error) {
+    console.error("Critical Failure running asset data pipeline: ", error);
+  }
 
   await simulateLoading();
+  await trackLoadPromise;
   loadingScreen.classList.add('hidden');
   hudOverlay.classList.add('visible');
 
   const clock = new THREE.Clock();
   const carPos = new THREE.Vector3();
   const closestPoint = new THREE.Vector3();
+
+  const raycaster = new THREE.Raycaster();
+  const rayOrigin = new THREE.Vector3();
+  const rayDirection = new THREE.Vector3(0, -1, 0);
   
   function animate() {
     requestAnimationFrame(animate);
@@ -111,28 +167,47 @@ async function init() {
     inputManager.update(dt);
 
     // ========================================================
-    // 🏁 TRACK DISTANCE & HARD WALL COLLISION MANAGMENT
+    // 🏁 VARIABLE-WIDTH DISTANCE & COLLISION TRACKING
     // ========================================================
     if (trackCurve && trackGenerator && vehicle && vehicle.mesh) {
       carPos.copy(vehicle.mesh.position);
       
-      // Calculate zero-allocation squared distance to track center spline
+      // Compute the absolute square distance to closest coordinate on track spine line
       const trackDistanceSq = trackGenerator.findClosestPointToPoint(carPos, closestPoint);
-      
-      // 1. Off-Track Traction Friction Penalty (6 meters squared is 36.0)
-      vehicle.isOffTrack = (trackDistanceSq > 36.0);
+      const actualDistance = Math.sqrt(trackDistanceSq);
+
+      // Find out exactly where we are along the spline parameter scale (0.0 to 1.0)
+      // We calculate parameter 't' dynamically by evaluating the closest index node 
+      let minD2 = Infinity;
+      let closestIdx = 0;
+      const pts = trackGenerator.sampledPoints;
+      for (let k = 0; k < pts.length; k++) {
+        const d2 = carPos.distanceToSquared(pts[k]);
+        if (d2 < minD2) { minD2 = d2; closestIdx = k; }
+      }
+      const localT = closestIdx / pts.length;
+
+      // Extract localized width limits for this specific track cross-section coordinate slice
+      const currentTrackWidth = trackGenerator._getTrackWidthAt(localT, trackGenerator.widthsData.length);
+      const currentRadius = currentTrackWidth / 2;
+
+      // Calculate Wall boundary zones dynamically relative to localized width parameters
+      const wallBound = currentRadius + 3.0;
+      const wallThreshold = wallBound - 1.2;
+
+      // 1. Dynamic Off-Track Traction Penalties
+      vehicle.isOffTrack = (actualDistance > currentRadius);
       vehicle.maxAccelerationScale = vehicle.isOffTrack ? 0.35 : 1.0;
 
-      // 2. Solid Outer Concrete Wall Collision Check (Wall sits at 8.0m, checking at 6.8m threshold)
-      if (trackDistanceSq >= 46.24) {
-        // Calculate the push-back normal direction pointing inward toward the track center
+      // 2. Dynamic Solid Variable-Width Concrete Barrier Collisions (Disabled to prevent invisible walls)
+      /*
+      if (actualDistance >= wallThreshold) {
         const pushDirection = new THREE.Vector3().subVectors(closestPoint, carPos).normalize();
-        pushDirection.y = 0; // Lock to ground horizon coordinate plane
+        pushDirection.y = 0; 
 
-        // Mathematically snap the vehicle mesh position back to exactly 6.7 meters from the center spline
-        vehicle.mesh.position.copy(closestPoint).addScaledVector(pushDirection, -6.7);
+        // Snap the chassis structure smoothly inside dynamic layout clearance lines
+        vehicle.mesh.position.copy(closestPoint).addScaledVector(pushDirection, -wallThreshold + 0.1);
         
-        // Reflect only the normal velocity component pointing toward the wall with a minor 0.1 scale dampening factor
         if (vehicle.velocity) {
           const dot = vehicle.velocity.dot(pushDirection);
           if (dot < 0) {
@@ -140,9 +215,32 @@ async function init() {
           }
         }
       }
+      */
+
+      // 3. Simple Elevation Matcher (Locks vehicle height profile to the Austrian hills)
+      if (!vehicle.isOffTrack) {
+         vehicle.mesh.position.y = THREE.MathUtils.lerp(vehicle.mesh.position.y, closestPoint.y + 0.4, 0.2);
+      }
     }
 
-    vehicle.update(dt, inputManager);
+    vehicle.update(dt, inputManager, trackGenerator);
+
+    // Perform downward raycast to find true track elevation and clamp vehicle altitude
+    if (trackGenerator && trackGenerator.trackMesh && vehicle && vehicle.gravityEnabled) {
+      rayOrigin.set(vehicle.position.x, vehicle.position.y + 10, vehicle.position.z);
+      raycaster.set(rayOrigin, rayDirection);
+      const intersects = raycaster.intersectObjects([trackGenerator.trackMesh], true);
+      if (intersects.length > 0) {
+        const targetGroundY = intersects[0].point.y;
+        if (vehicle.physicsBody) {
+          vehicle.physicsBody.position.y = targetGroundY + 0.1;
+        } else {
+          vehicle.position.y = targetGroundY + 0.1;
+          vehicle.mesh.position.y = vehicle.position.y;
+        }
+      }
+    }
+
     cameraManager.update(dt, vehicle.mesh, vehicle.velocity);
 
     // UI Updates
@@ -158,7 +256,7 @@ async function init() {
     }
 
     if (hudDashboard) {
-      if (vehicle.rpm >= 14000) {
+      if (vehicle.rpm >= (vehicle.maxRPM - 1000)) { // Dynamic critical flashing limit
         hudDashboard.classList.add('rpm-critical-flash');
       } else {
         hudDashboard.classList.remove('rpm-critical-flash');
@@ -166,8 +264,9 @@ async function init() {
     }
 
     const vPos = vehicle.getPosition();
-    posX.textContent = `X: ${vPos.x.toFixed(1)}`;
-    posZ.textContent = `Z: ${vPos.z.toFixed(1)}`;
+    if (posX) posX.textContent = `X: ${vPos.x.toFixed(1)}`;
+    if (posY) posY.textContent = `Y: ${vPos.y.toFixed(1)}`;
+    if (posZ) posZ.textContent = `Z: ${vPos.z.toFixed(1)}`;
 
     renderer.render(scene, camera);
   }
@@ -175,19 +274,7 @@ async function init() {
   animate();
 }
 
-function addReferenceObjects(scene) {
-  // Landmark cones commented out to keep the track clean
-  /*
-  const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xdd4400, roughness: 0.6 });
-  const coneGeometry = new THREE.ConeGeometry(0.3, 0.8, 8);
-  const conePositions = [[3, 0, -5], [-3, 0, -5], [3, 0, -25], [-3, 0, -25]];
-  conePositions.forEach(([x, y, z]) => {
-    const cone = new THREE.Mesh(coneGeometry, coneMaterial);
-    cone.position.set(x, y + 0.4, z);
-    scene.add(cone);
-  });
-  */
-}
+function addReferenceObjects(scene) {}
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -195,9 +282,6 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ============================================
-// Telemetry Clipboard Listener
-// ============================================
 window.addEventListener('keydown', (e) => {
   if (e.key === 'p' || e.key === 'P') { 
     if (vehicle) {

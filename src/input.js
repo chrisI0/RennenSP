@@ -33,6 +33,7 @@ export class UniversalInputManager {
     this.steering = 0.0;  // -1.0 (Full Left) to 1.0 (Full Right)
     this.throttle = 0.0;  // 0.0 to 1.0
     this.brake = 0.0;     // 0.0 to 1.0
+    this.isGhostMode = false;
 
     // ── Device Priority State ──────────────────────────────
     this.activeDevice = 'Keyboard'; // 'Keyboard' | 'Mouse' | 'Gamepad'
@@ -42,7 +43,10 @@ export class UniversalInputManager {
       KeyW: false, ArrowUp: false,
       KeyA: false, ArrowLeft: false,
       KeyS: false, ArrowDown: false,
-      KeyD: false, ArrowRight: false
+      KeyD: false, ArrowRight: false,
+      Space: false,
+      ControlLeft: false,
+      AltLeft: false
     };
     this._autoCenterActive = false;
 
@@ -103,6 +107,10 @@ export class UniversalInputManager {
     if (e.code === this.autoCenterKey) {
       this._autoCenterActive = true;
     }
+    if (e.code === 'KeyG') {
+      this.isGhostMode = !this.isGhostMode;
+      console.log("Ghost Mode toggled:", this.isGhostMode);
+    }
   }
 
   _handleKeyUp(e) {
@@ -131,6 +139,14 @@ export class UniversalInputManager {
   // ================================================================
 
   update(dt) {
+    if (this.isGhostMode) {
+      this.steering = 0.0;
+      this.throttle = 0.0;
+      this.brake = 0.0;
+      this._updateOverlay();
+      return;
+    }
+
     // ── 1. Gamepad API Input Scanning ──
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     let gamepadActive = false;

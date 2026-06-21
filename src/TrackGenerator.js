@@ -1,294 +1,107 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 export class TrackGenerator {
-  constructor(scene, trackConfig = {}) {
+  constructor(scene, modelUrl, onLoadCallback) {
     this.scene = scene;
-    this.trackWidth = trackConfig.trackWidth || 12;
-    this.trackRadius = this.trackWidth / 2;
-    this.wallRadius = trackConfig.wallRadius || 7.8; // Distance to the concrete safety walls
-
-    const trackPoints = trackConfig.points || [
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(120, 0, 0),
-      new THREE.Vector3(260, 0, 50),
-      new THREE.Vector3(300, 0, 180),
-      new THREE.Vector3(200, 0, 300),
-      new THREE.Vector3(80, 0, 320),
-      new THREE.Vector3(0, 0, 280),
-      new THREE.Vector3(40, 0, 200),
-      new THREE.Vector3(120, 0, 150),
-      new THREE.Vector3(60, 0, 90),
-      new THREE.Vector3(-100, 0, 80),
-      new THREE.Vector3(-180, 0, 20),
+    
+    // 1. Mathematically construct the authentic Z-axis aligned Red Bull Ring path vectors
+    const controlPoints = [
+      new THREE.Vector3(0, -54.0, 0),         // 0: Start Line (Straight 1)
+      new THREE.Vector3(0, -54.0, -325),      // 1: Mid Straight 1
+      new THREE.Vector3(0, -54.0, -650),      // 2: Turn 1 Entry (Niki Lauda Kurve)
+      new THREE.Vector3(20, -51.5, -680),   // 3: Turn 1 Apex Climb
+      new THREE.Vector3(60, -49.0, -650),   // 4: Turn 1 Exit / Remus Straight Entry
+      new THREE.Vector3(200, -43.85, -500), // 5: Remus Straight Uphill
+      new THREE.Vector3(400, -38.1, -350),  // 6: Remus Straight Uphill
+      new THREE.Vector3(600, -32.35, -200), // 7: Remus Straight Uphill
+      new THREE.Vector3(800, -26.6, -50),   // 8: Remus Straight Uphill
+      new THREE.Vector3(820, -26.0, -20),   // 9: Turn 3 Hairpin Entry (Remus)
+      new THREE.Vector3(840, -26.0, 10),    // 10: Turn 3 Apex (highest altitude Y=-26)
+      new THREE.Vector3(820, -27.0, 40),    // 11: Turn 3 Exit downhill
+      new THREE.Vector3(650, -32.0, 20),    // 12: Straight 3 Downhill
+      new THREE.Vector3(480, -37.0, 0),     // 13: Turn 4 Entry (Rauch)
+      new THREE.Vector3(430, -39.0, -10),   // 14: Turn 4 Apex (Rauch left turn)
+      new THREE.Vector3(410, -41.0, 40),    // 15: Turn 4 Exit
+      new THREE.Vector3(300, -44.0, 100),   // 16: Turn 5 (Infield fast sweeper)
+      new THREE.Vector3(200, -47.0, 150),   // 17: Turn 6 (Infield fast sweeper)
+      new THREE.Vector3(100, -49.0, 200),   // 18: Turn 7 (Infield fast sweeper)
+      new THREE.Vector3(20, -51.0, 150),    // 19: Turn 8 downhill
+      new THREE.Vector3(-50, -53.0, 80),    // 20: Turn 9 (Jochen Rindt right turn)
+      new THREE.Vector3(-30, -54.0, 20)     // 21: Turn 10 (Red Bull Mobile right turn)
     ];
 
-    this.kerbZones = trackConfig.kerbZones || [
-      { start: 35, end: 115 },
-      { start: 145, end: 285 }
+    const controlWidths = [
+      15.0, 15.0, 15.0, 13.0, 12.0, 13.0, 13.0, 13.0, 13.0, 11.0, 
+      11.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 13.0, 14.0, 15.0
     ];
 
-    this.startLineSegment = trackConfig.startLineSegment !== undefined ? trackConfig.startLineSegment : 5;
-
-    this.curve = new THREE.CatmullRomCurve3(trackPoints, true, 'centripetal');
+    this.curve = new THREE.CatmullRomCurve3(controlPoints, true, 'centripetal');
     this.sampledPoints = this.curve.getSpacedPoints(400);
+
+    // Dynamic width interpolation data
+    this.widthsData = [];
+    const pCount = controlPoints.length;
+    for (let i = 0; i <= 400; i++) {
+      const t = i / 400;
+      const rawIndex = t * (pCount - 1);
+      const baseIdx = Math.floor(rawIndex);
+      const nextIdx = (baseIdx + 1) % pCount;
+      const alpha = rawIndex - baseIdx;
+      const w0 = controlWidths[baseIdx];
+      const w1 = controlWidths[nextIdx];
+      this.widthsData.push(THREE.MathUtils.lerp(w0, w1, alpha));
+    }
 
     this._ab = new THREE.Vector3();
     this._ap = new THREE.Vector3();
     this._outA = new THREE.Vector3();
     this._outB = new THREE.Vector3();
 
-    // 1. Compile road and walls
-    this.trackSystemMesh = this._buildTrackSystem();
-    this.scene.add(this.trackSystemMesh);
+    // 2. Load the 3D model GLTF asset from cloud storage
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.5/');
 
-    // 2. Generate red/white apex kerbs in turns (both inside and outside edges)
-    this.kerbsMesh = this._buildApexKerbs();
-    if (this.kerbsMesh) {
-      this.scene.add(this.kerbsMesh);
-    }
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+    loader.load(modelUrl, (gltf) => {
+      this.trackMesh = gltf.scene;
+      
+      const loaderText = document.querySelector('.loader-text');
+      if (loaderText) {
+        loaderText.textContent = "Unpacking and configuring 3D environment...";
+      }
+      
+      this.scene.add(this.trackMesh);
+      this.trackMesh.updateMatrixWorld(true);
 
-    // 3. Generate FIA start/finish line
-    this.startFinishMesh = this._buildStartFinishLine();
-    this.scene.add(this.startFinishMesh);
-  }
-
-  _buildTrackSystem() {
-    const segments = 400;
-    const vertices = [];
-    const colors = [];
-    const indices = [];
-    const UP = new THREE.Vector3(0, 1, 0);
-
-    const asphaltColor = new THREE.Color(0x1c1d21);
-    const whiteLineColor = new THREE.Color(0xeeeeee);
-    const concreteWallColor = new THREE.Color(0xf0f0f0); // White barriers
-    
-    let vertexCount = 0;
-
-    for (let i = 0; i <= segments; i++) {
-      const t = i / segments;
-      const pos = this.curve.getPointAt(t);
-      const tangent = this.curve.getTangentAt(t).normalize();
-      const sideNormal = new THREE.Vector3().crossVectors(tangent, UP).normalize();
-
-      const offsets = [
-        -8.0, -8.0, -8.4, -8.4, // Left Wall Loop Profile
-        -this.trackRadius - 0.15, -this.trackRadius, 
-        this.trackRadius, this.trackRadius + 0.15,
-        8.0, 8.0, 8.4, 8.4      // Right Wall Loop Profile
-      ];
-
-      offsets.forEach((offset, idx) => {
-        const pt = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, offset);
+      // Yield to browser frame rates before calling load callback
+      setTimeout(() => {
+        console.log("3D Environment model loaded successfully!");
         
-        let y = 0.04; // Asphalt center baseline
-        if (idx === 1 || idx === 2 || idx === 9 || idx === 10) {
-          y = 1.2; // Top of the 3D safety wall barrier blocks
-        } else if (idx === 0 || idx === 3 || idx === 8 || idx === 11) {
-          y = 0.0; // Foundation floor anchor of the walls
-        } else if (idx === 4 || idx === 7) {
-          y = 0.05; // Crisp White lines elevated above asphalt (0.04m)
+        // Trigger callback so main.js knows the map is ready
+        if (onLoadCallback) onLoadCallback(gltf);
+      }, 100);
+    }, 
+    (xhr) => {
+      if (xhr.total) {
+        const percent = Math.min((xhr.loaded / xhr.total) * 100, 99);
+        const loaderFill = document.getElementById('loader-fill');
+        if (loaderFill) {
+          loaderFill.style.width = `${percent}%`;
         }
-
-        vertices.push(pt.x, y, pt.z);
-
-        // Color logic
-        let finalColor = asphaltColor;
-        if (idx === 0 || idx === 1 || idx === 2 || idx === 3) {
-          finalColor = concreteWallColor; // Left 3D Barrier Wall (White)
-        } else if (idx === 8 || idx === 9 || idx === 10 || idx === 11) {
-          finalColor = concreteWallColor; // Right 3D Barrier Wall (White)
-        } else if (idx === 4 || idx === 7) {
-          finalColor = whiteLineColor;    // Edge Boundary Side Lines (Crisp White)
-        } else {
-          finalColor = asphaltColor;      // Asphalt core
-        }
-
-        colors.push(finalColor.r, finalColor.g, finalColor.b);
-      });
-
-      if (i < segments) {
-        const r = vertexCount;
-        const n = vertexCount + 12;
-
-        // Bridge the 3D Left Wall solid box panels
-        indices.push(r+0, r+1, n+0); indices.push(r+1, n+1, n+0); // Inside face
-        indices.push(r+1, r+2, n+1); indices.push(r+2, n+2, n+1); // Top face
-        indices.push(r+2, r+3, n+2); indices.push(r+3, n+3, n+2); // Outside face
-
-        // Bridge Left White Line panel strip (from 4 to 5)
-        indices.push(r+4, r+5, n+4); indices.push(r+5, n+5, n+4);
-
-        // Bridge Main Asphalt Core driving lane tracks (from 5 to 6)
-        indices.push(r+5, r+6, n+5); indices.push(r+6, n+6, n+5);
-
-        // Bridge Right White Line panel strip (from 6 to 7)
-        indices.push(r+6, r+7, n+6); indices.push(r+7, n+7, n+6);
-
-        // Bridge the 3D Right Wall solid box panels
-        indices.push(r+8, r+9, n+8); indices.push(r+9, n+9, n+8);   // Inside face
-        indices.push(r+9, r+10, n+9); indices.push(r+10, n+10, n+9); // Top face
-        indices.push(r+10, r+11, n+10); indices.push(r+11, n+11, n+10); // Outside face
       }
-
-      vertexCount += 12;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.75,
-      metalness: 0.1,
-      side: THREE.DoubleSide
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return mesh;
+    },
+    (error) => console.error("Error loading 3D map asset:", error));
   }
 
-  _buildApexKerbs() {
-    const segments = 400;
-    const vertices = [];
-    const colors = [];
-    const indices = [];
-    const UP = new THREE.Vector3(0, 1, 0);
-
-    const redColor = new THREE.Color(0xd32f2f);
-    const whiteColor = new THREE.Color(0xffffff);
-
-    let vIdx = 0;
-
-    for (let i = 0; i < segments; i++) {
-      // Curve zones from dynamic configuration
-      const isKerbSegment = this.kerbZones.some(zone => i >= zone.start && i < zone.end);
-      if (!isKerbSegment) continue;
-
-      const t0 = i / segments;
-      const t1 = (i + 1) / segments;
-
-      const pos0 = this.curve.getPointAt(t0);
-      const pos1 = this.curve.getPointAt(t1);
-
-      const tangent0 = this.curve.getTangentAt(t0).normalize();
-      const tangent1 = this.curve.getTangentAt(t1).normalize();
-
-      const sideNormal0 = new THREE.Vector3().crossVectors(tangent0, UP).normalize();
-      const sideNormal1 = new THREE.Vector3().crossVectors(tangent1, UP).normalize();
-
-      // Determine color pattern (alternating pure blocks)
-      const isRed = (Math.floor(i / 2) % 2 === 0);
-      const finalColor = isRed ? redColor : whiteColor;
-
-      // 1. Left Kerb Quad (from -7.0m to -6.0m, outside of track edge)
-      const leftInner0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -6.0);
-      const leftOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, -7.0);
-      const leftInner1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -6.0);
-      const leftOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, -7.0);
-
-      vertices.push(leftInner0.x, 0.051, leftInner0.z);
-      vertices.push(leftOuter0.x, 0.051, leftOuter0.z);
-      vertices.push(leftInner1.x, 0.051, leftInner1.z);
-      vertices.push(leftOuter1.x, 0.051, leftOuter1.z);
-
-      for (let j = 0; j < 4; j++) {
-        colors.push(finalColor.r, finalColor.g, finalColor.b);
-      }
-
-      indices.push(vIdx + 0, vIdx + 1, vIdx + 2);
-      indices.push(vIdx + 1, vIdx + 3, vIdx + 2);
-      vIdx += 4;
-
-      // 2. Right Kerb Quad (from 6.0m to 7.0m, outside of track edge)
-      const rightInner0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 6.0);
-      const rightOuter0 = new THREE.Vector3().copy(pos0).addScaledVector(sideNormal0, 7.0);
-      const rightInner1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 6.0);
-      const rightOuter1 = new THREE.Vector3().copy(pos1).addScaledVector(sideNormal1, 7.0);
-
-      vertices.push(rightInner0.x, 0.051, rightInner0.z);
-      vertices.push(rightOuter0.x, 0.051, rightOuter0.z);
-      vertices.push(rightInner1.x, 0.051, rightInner1.z);
-      vertices.push(rightOuter1.x, 0.051, rightOuter1.z);
-
-      for (let j = 0; j < 4; j++) {
-        colors.push(finalColor.r, finalColor.g, finalColor.b);
-      }
-
-      indices.push(vIdx + 0, vIdx + 1, vIdx + 2);
-      indices.push(vIdx + 1, vIdx + 3, vIdx + 2);
-      vIdx += 4;
-    }
-
-    if (vertices.length === 0) return null;
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.8,
-      metalness: 0.1,
-      side: THREE.DoubleSide
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.receiveShadow = true;
-    return mesh;
-  }
-
-  _buildStartFinishLine() {
-    const targetSegment = this.startLineSegment;
-    const segments = 400;
-    const t = targetSegment / segments;
-    const pos = this.curve.getPointAt(t);
-    const tangent = this.curve.getTangentAt(t).normalize();
-    const UP = new THREE.Vector3(0, 1, 0);
-    const sideNormal = new THREE.Vector3().crossVectors(tangent, UP).normalize();
-
-    const halfWidth = 0.30; // 0.60m total width (FIA regulation)
-    const vertices = [];
-    const indices = [];
-
-    const p0 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, -this.trackRadius).addScaledVector(tangent, -halfWidth);
-    const p1 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, -this.trackRadius).addScaledVector(tangent, halfWidth);
-    const p2 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.trackRadius).addScaledVector(tangent, -halfWidth);
-    const p3 = new THREE.Vector3().copy(pos).addScaledVector(sideNormal, this.trackRadius).addScaledVector(tangent, halfWidth);
-
-    vertices.push(p0.x, 0.052, p0.z);
-    vertices.push(p1.x, 0.052, p1.z);
-    vertices.push(p2.x, 0.052, p2.z);
-    vertices.push(p3.x, 0.052, p3.z);
-
-    indices.push(0, 1, 2);
-    indices.push(2, 1, 3);
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.8,
-      metalness: 0.1,
-      side: THREE.DoubleSide
-    });
-    material.polygonOffset = true;
-    material.polygonOffsetFactor = -2;
-    material.polygonOffsetUnits = -2;
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.receiveShadow = true;
-    return mesh;
+  _getTrackWidthAt(t, rawPointsCount) {
+    const rawIndex = t * 400;
+    const baseIdx = Math.floor(rawIndex);
+    const nextIdx = (baseIdx + 1) % 401;
+    const alpha = rawIndex - baseIdx;
+    return THREE.MathUtils.lerp(this.widthsData[baseIdx], this.widthsData[nextIdx], alpha);
   }
 
   findClosestPointToPoint(point, outPoint) {
@@ -329,34 +142,3 @@ export class TrackGenerator {
     return p.distanceToSquared(out);
   }
 }
-
-/**
- * ============================================================================
- * 🏁 INITIALIZATION REFERENCE FOR main.js
- * ============================================================================
- * To load custom tracks dynamically, instantiate TrackGenerator with a config
- * map as shown in this example:
- *
- * import { TrackGenerator } from './TrackGenerator.js';
- *
- * const customTrackConfig = {
- *   trackWidth: 14,      // Total track width in meters
- *   wallRadius: 9.0,     // Distance to the safety barriers in meters
- *   startLineSegment: 8, // Index of segment where start/finish line is drawn
- *   points: [            // Custom 3D coordinates defining the spline path
- *     new THREE.Vector3(0, 0, 0),
- *     new THREE.Vector3(150, 0, 20),
- *     new THREE.Vector3(250, 0, 100),
- *     new THREE.Vector3(200, 0, 220),
- *     new THREE.Vector3(50, 0, 180),
- *     new THREE.Vector3(-100, 0, 50)
- *   ],
- *   kerbZones: [         // Segments where rumble kerbs will generate
- *     { start: 20, end: 60 },
- *     { start: 120, end: 180 }
- *   ]
- * };
- *
- * // Instantiate with the configuration map:
- * const trackGenerator = new TrackGenerator(scene, customTrackConfig);
- */

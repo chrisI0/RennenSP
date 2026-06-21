@@ -34,16 +34,16 @@ export class SimpleRaycastVehicle {
     this._scene = scene;
 
     // ── Chassis dimensions ────────────────────────────────
-    this.chassisWidth  = 2.0;
-    this.chassisHeight = 1.0;
+    this.chassisWidth  = 1.9;
+    this.chassisHeight = 1.3;
     this.chassisLength = 4.5;
 
     // ── Rigid body state ──────────────────────────────────
     this.mass = 1400; // kg
 
     this.position        = new THREE.Vector3(0, 2, 0);
-    this.velocity        = new THREE.Vector3();
-    this.acceleration    = new THREE.Vector3();
+    this.velocity        = new THREE.Vector3(0, 0, 0);
+    this.acceleration    = new THREE.Vector3(0, 0, 0);
     this.angularVelocity = new THREE.Vector3();
     this.orientation     = new THREE.Quaternion();
 
@@ -89,6 +89,8 @@ export class SimpleRaycastVehicle {
     this.shiftUpRPM = 14200;
     this.shiftDownRPM = 4500;
     this.isOffTrack = false;
+    this.gravityEnabled = false; // Default to static/floating state on page load
+    this._wasInGhostMode = false;
 
     // ── Steering & tires ──────────────────────────────────
     this.maxSteerAngle      = Math.PI / 6;  // 30°
@@ -98,15 +100,17 @@ export class SimpleRaycastVehicle {
     this.angularDamping     = 2.0;          // per-second damping factor
 
     // ── Wheel layout (local space from chassis center) ────
-    const hw = w * 0.5;
-    const hh = h * 0.5;
-    const hl = l * 0.5;
+    const trackWidth = 1.6;
+    const wheelbase  = 2.5;
+    const hw = trackWidth * 0.5;
+    const hl = wheelbase * 0.5;
+    const hh = -0.35;
 
     this._localWheelPos = [
-      new THREE.Vector3(-hw, -hh, -hl),  // 0 : Front-Left
-      new THREE.Vector3( hw, -hh, -hl),  // 1 : Front-Right
-      new THREE.Vector3(-hw, -hh,  hl),  // 2 : Rear-Left
-      new THREE.Vector3( hw, -hh,  hl),  // 3 : Rear-Right
+      new THREE.Vector3(-hw, hh, -hl),  // 0 : Front-Left
+      new THREE.Vector3( hw, hh, -hl),  // 1 : Front-Right
+      new THREE.Vector3(-hw, hh,  hl),  // 2 : Rear-Left
+      new THREE.Vector3( hw, hh,  hl),  // 3 : Rear-Right
     ];
 
     // Per-wheel readable state
@@ -136,6 +140,9 @@ export class SimpleRaycastVehicle {
     // Scratch quaternion
     this._q0 = new THREE.Quaternion();
 
+    // Track surface elevation scratch point
+    this._scratchTrackPoint = new THREE.Vector3();
+
     // ── Build Three.js mesh ───────────────────────────────
     this._buildMesh();
   }
@@ -148,14 +155,14 @@ export class SimpleRaycastVehicle {
     const { chassisWidth: w, chassisHeight: h, chassisLength: l } = this;
     const boxGeo = new THREE.BoxGeometry(w, h, l);
 
-    // Translucent fill
+    // Visible opaque fill
     const fillMat = new THREE.MeshStandardMaterial({
       color:       0x2255cc,
-      transparent: true,
-      opacity:     0.12,
+      transparent: false,
+      opacity:     1.0,
       roughness:   0.4,
       metalness:   0.6,
-      depthWrite:  false,
+      depthWrite:  true,
     });
 
     this.mesh = new THREE.Mesh(boxGeo, fillMat);
@@ -189,6 +196,24 @@ export class SimpleRaycastVehicle {
 
     this._scene.add(this.mesh);
 
+    // Set explicit, stable starting vectors
+    const vehicle = this;
+    const REVENUE_SPAWN = { x: 432.6, y: -41.2, z: 160.1 };
+
+    if (vehicle.physicsBody) {
+        vehicle.physicsBody.position.set(REVENUE_SPAWN.x, REVENUE_SPAWN.y + 2.0, REVENUE_SPAWN.z);
+        vehicle.physicsBody.velocity.set(0, 0, 0);
+    } else {
+        vehicle.position.set(REVENUE_SPAWN.x, REVENUE_SPAWN.y + 2.0, REVENUE_SPAWN.z);
+    }
+
+    // Temporary startup freeze
+    if (vehicle.physicsBody) {
+        vehicle.physicsBody.mass = 0; // 0 mass makes it immune to gravity
+        vehicle.physicsBody.type = 2; // Kinematic/Static state
+        vehicle.physicsBody.updateMassProperties();
+    }
+
     // Sync initial pose
     this.mesh.position.copy(this.position);
     this.mesh.quaternion.copy(this.orientation);
@@ -206,11 +231,116 @@ export class SimpleRaycastVehicle {
    *   inputs.steering  –  -1 (left) … +1 (right)
    *   inputs.throttle  –   0 … 1
    *   inputs.brake     –   0 … 1
+   * @param {object} [trackGenerator] TrackGenerator instance
    */
-  update(dt, inputs) {
+  update(dt, inputs, trackGenerator) {
     // Stability guard
     if (dt > 0.02) dt = 0.02;
     if (dt <= 0) return;
+
+    // Developer Ghost Mode Check
+    if (inputs && inputs.isGhostMode) {
+      this._wasInGhostMode = true;
+      this.gravityEnabled = false;
+
+      // Freeze all velocities and angular velocities
+      this.velocity.set(0, 0, 0);
+      this.acceleration.set(0, 0, 0);
+      this.angularVelocity.set(0, 0, 0);
+
+      // Local horizontal forward and right vectors
+      this._forward.set(0, 0, -1).applyQuaternion(this.orientation);
+      this._right.set(1, 0, 0).applyQuaternion(this.orientation);
+
+      const fwd = new THREE.Vector3().copy(this._forward);
+      fwd.y = 0;
+      if (fwd.lengthSq() > 1e-6) fwd.normalize();
+      else fwd.set(0, 0, -1);
+
+      const rgt = new THREE.Vector3().copy(this._right);
+      rgt.y = 0;
+      if (rgt.lengthSq() > 1e-6) rgt.normalize();
+      else rgt.set(1, 0, 0);
+
+      // Movement context routing in Ghost Mode
+      if (inputs.keys.KeyW || inputs.keys.ArrowUp) {
+        this.position.addScaledVector(fwd, 0.4);
+      }
+      if (inputs.keys.KeyS || inputs.keys.ArrowDown) {
+        this.position.addScaledVector(fwd, -0.4);
+      }
+      if (inputs.keys.KeyA || inputs.keys.ArrowLeft) {
+        this.position.addScaledVector(rgt, -0.4);
+      }
+      if (inputs.keys.KeyD || inputs.keys.ArrowRight) {
+        this.position.addScaledVector(rgt, 0.4);
+      }
+      if (inputs.keys.Space) {
+        this.position.y += 0.4;
+      }
+      if (inputs.keys.ControlLeft) {
+        this.position.y -= 0.4;
+      }
+
+      this.mesh.position.copy(this.position);
+      this.mesh.quaternion.copy(this.orientation);
+      return;
+    } else {
+      // Normal Driving Mode: restore gravity on toggle exit
+      if (this._wasInGhostMode) {
+        this.gravityEnabled = true;
+        this._wasInGhostMode = false;
+
+        // Perform downward raycast to find the exact track height directly underneath
+        let targetGroundY = this.position.y;
+        let groundFound = false;
+
+        if (trackGenerator && trackGenerator.trackMesh) {
+          const raycaster = new THREE.Raycaster();
+          const rayOrigin = new THREE.Vector3(this.position.x, this.position.y + 10, this.position.z);
+          const rayDirection = new THREE.Vector3(0, -1, 0);
+          raycaster.set(rayOrigin, rayDirection);
+          const intersects = raycaster.intersectObjects([trackGenerator.trackMesh], true);
+          if (intersects.length > 0) {
+            targetGroundY = intersects[0].point.y;
+            groundFound = true;
+          }
+        }
+
+        if (!groundFound && trackGenerator) {
+          // Fallback to spline height
+          trackGenerator.findClosestPointToPoint(this.position, this._scratchTrackPoint);
+          targetGroundY = this._scratchTrackPoint.y;
+          groundFound = true;
+        }
+
+        // Warp position to 50cm above the ground surface to prevent clipping/lag
+        if (groundFound) {
+          this.position.y = targetGroundY + 0.5;
+        }
+
+        // Reset all velocities, forces, and moments
+        if (this.physicsBody) {
+          this.physicsBody.velocity.set(0, 0, 0);
+          this.physicsBody.angularVelocity.set(0, 0, 0);
+          this.physicsBody.force.set(0, 0, 0);
+          this.physicsBody.torque.set(0, 0, 0);
+        }
+        this.velocity.set(0, 0, 0);
+        this.acceleration.set(0, 0, 0);
+        this.angularVelocity.set(0, 0, 0);
+      }
+    }
+
+    if (!this.gravityEnabled) {
+      // Freeze rigid body state when gravity is suspended (e.g. initial start screen)
+      this.velocity.set(0, 0, 0);
+      this.acceleration.set(0, 0, 0);
+      this.angularVelocity.set(0, 0, 0);
+      this.mesh.position.copy(this.position);
+      this.mesh.quaternion.copy(this.orientation);
+      return;
+    }
 
     // Read inputs
     // Negate steering so that positive input = clockwise yaw (right turn)
@@ -279,8 +409,13 @@ export class SimpleRaycastVehicle {
       const r = this._v[0];
       r.subVectors(wp, this.position);
 
-      // ── Raycast toward ground (Y = 0) ───────────────────
-      const distToGround = wp.y;
+      // ── Raycast toward track surface ────────────────────
+      let groundHeight = 0;
+      if (trackGenerator) {
+        trackGenerator.findClosestPointToPoint(wp, this._scratchTrackPoint);
+        groundHeight = this._scratchTrackPoint.y;
+      }
+      const distToGround = wp.y - groundHeight;
 
       if (distToGround >= this.suspensionRestLength) {
         // Wheel in the air
@@ -484,7 +619,12 @@ export class SimpleRaycastVehicle {
     // ────────────────────────────────────────────────────────
     //  GROUND CONSTRAINT
     // ────────────────────────────────────────────────────────
-    const minY = this.chassisHeight * 0.5;
+    let trackElevation = 0;
+    if (trackGenerator) {
+      trackGenerator.findClosestPointToPoint(this.position, this._scratchTrackPoint);
+      trackElevation = this._scratchTrackPoint.y;
+    }
+    const minY = trackElevation + this.chassisHeight * 0.5;
     if (this.position.y < minY) {
       this.position.y = minY;
       if (this.velocity.y < 0) this.velocity.y = 0;

@@ -21,8 +21,8 @@ export class SimVehicleCameraManager {
     this.camera = camera;
 
     // Camera geometry
-    this.followDistance    = options.followDistance    ?? 6.0;
-    this.followHeight     = options.followHeight     ?? 2.2;
+    this.followDistance    = options.followDistance    ?? 8.0;
+    this.followHeight     = options.followHeight     ?? 3.5;
     this.lookAheadDistance = options.lookAheadDistance ?? 1.5; // target = car position + car forward vector * 1.5
 
     // Smoothing rates
@@ -57,7 +57,7 @@ export class SimVehicleCameraManager {
   update(dt, vehicleChassisMesh, vehicleVelocity) {
     if (dt <= 0) return;
 
-    const carPos  = vehicleChassisMesh.position;
+    const carPos = vehicleChassisMesh.position;
     const carQuat = vehicleChassisMesh.quaternion;
 
     // 1. Calculate car's 3D forward vector (-Z is forward in Three.js standard for this model)
@@ -73,23 +73,18 @@ export class SimVehicleCameraManager {
       this._carForwardXZ.set(0, 0, -1);
     }
 
-    // 3. Ideal Position: Float exactly 6.0 meters behind the car and 2.2 meters above it
+    // 3. Ideal Position: Float behind the car (-XZ direction) and above it (+Y direction)
+    // When driving forward along negative Z, this places camera at +Z (behind) and +Y (above).
     this._idealPos.copy(carPos).addScaledVector(this._carForwardXZ, -this.followDistance);
     this._idealPos.y += this.followHeight;
 
-    // 4. Look-At Target: Look at a point slightly ahead of the car's center (e.g. target = car position + car forward vector * 1.5)
-    this._idealLookAt.copy(carPos).addScaledVector(this._carForward, this.lookAheadDistance);
+    // 4. Look-At Target: Look at the car's center
+    this._idealLookAt.copy(carPos);
 
-    // 5. First-frame snap
+    // 5. First-frame snap / Initialization
     if (!this._initialized) {
       this.camera.position.copy(this._idealPos);
       this._smoothLookAt.copy(this._idealLookAt);
-
-      // Apply height guardrail
-      if (this.camera.position.y < this.minHeight) {
-        this.camera.position.y = this.minHeight;
-      }
-
       this.camera.lookAt(this._smoothLookAt);
       this.camera.fov = this.baseFOV;
       this.camera.updateProjectionMatrix();
@@ -104,9 +99,10 @@ export class SimVehicleCameraManager {
     this.camera.position.lerp(this._idealPos, posAlpha);
     this._smoothLookAt.lerp(this._idealLookAt, lookAlpha);
 
-    // 7. Height Guardrail: Never drop below 0.8 meters relative to the ground plane
-    if (this.camera.position.y < this.minHeight) {
-      this.camera.position.y = this.minHeight;
+    // 7. Height Guardrail: Never drop below minHeight relative to the car's Y position
+    const minCamHeight = carPos.y + this.minHeight;
+    if (this.camera.position.y < minCamHeight) {
+      this.camera.position.y = minCamHeight;
     }
 
     // 8. Apply Look-At
