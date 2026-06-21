@@ -132,6 +132,14 @@ async function init() {
 
   await trackLoadPromise;
 
+  // Set the vehicle Y position to the exact ground height + chassis offset on load
+  if (vehicle && trackGenerator) {
+    const startGroundY = vehicle.getGroundHeight(vehicle.position, trackGenerator);
+    vehicle.position.y = startGroundY + 0.65;
+    vehicle.mesh.position.copy(vehicle.position);
+    console.log(`Car snapped to terrain height on startup: ${startGroundY.toFixed(2)}m (total Y: ${vehicle.position.y.toFixed(2)}m)`);
+  }
+
   // Hide the game loader overlay once fully loaded
   const gameLoader = document.getElementById('game-loader-screen');
   if (gameLoader) {
@@ -144,6 +152,7 @@ async function init() {
   const closestPoint = new THREE.Vector3();
 
 
+  let frameCount = 0;
   
   function animate() {
     requestAnimationFrame(animate);
@@ -232,10 +241,40 @@ async function init() {
       }
     }
 
+    frameCount++;
     const vPos = vehicle.getPosition();
     if (posX) posX.textContent = `X: ${vPos.x.toFixed(1)}`;
     if (posY) posY.textContent = `Y: ${vPos.y.toFixed(1)}`;
     if (posZ) posZ.textContent = `Z: ${vPos.z.toFixed(1)}`;
+
+    const debugLog = document.getElementById('debug-log');
+    let hitType = 'none';
+    let groundY = 0;
+    if (trackGenerator && trackGenerator.collidableMeshes && trackGenerator.collidableMeshes.length > 0) {
+      const origin = new THREE.Vector3(vPos.x, 2000, vPos.z);
+      const raycaster = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0));
+      const intersects = raycaster.intersectObjects(trackGenerator.collidableMeshes, false);
+      if (intersects.length > 0) {
+        hitType = `mesh (${intersects[0].object.name || 'unnamed'})`;
+        groundY = intersects[0].point.y;
+      } else {
+        trackGenerator.findClosestPointToPoint(vPos, vehicle._scratchTrackPoint);
+        hitType = 'spline fallback';
+        groundY = vehicle._scratchTrackPoint.y;
+      }
+    }
+
+    if (debugLog && vehicle) {
+      debugLog.innerHTML = `
+        Car Pos: X: ${vPos.x.toFixed(1)} Y: ${vPos.y.toFixed(1)} Z: ${vPos.z.toFixed(1)}<br>
+        Ground Height: ${groundY.toFixed(1)} (${hitType})<br>
+        Collidable Meshes Count: ${trackGenerator ? (trackGenerator.collidableMeshes ? trackGenerator.collidableMeshes.length : 0) : 0}<br>
+        Gravity Enabled: ${vehicle.gravityEnabled}<br>
+        Ghost Mode: ${inputManager.isGhostMode}<br>
+        Grounded count: ${vehicle.wheelGrounded.filter(g => g).length}/4
+      `;
+    }
+    
 
     renderer.render(scene, camera);
   }

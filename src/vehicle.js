@@ -298,7 +298,7 @@ export class SimpleRaycastVehicle {
 
         // Perform downward raycast to find the exact track height directly underneath
         const targetGroundY = this.getGroundHeight(this.position, trackGenerator);
-        this.position.y = targetGroundY + 0.5;
+        this.position.y = targetGroundY + 0.7;
 
         // Reset all velocities, forces, and moments
         if (this.physicsBody) {
@@ -696,10 +696,11 @@ export class SimpleRaycastVehicle {
    * @returns {number}
    */
   getGroundHeight(pos, trackGenerator) {
-    if (trackGenerator && trackGenerator.roadMesh) {
-      this._groundRayOrigin.set(pos.x, pos.y + 10, pos.z);
+    if (trackGenerator && trackGenerator.collidableMeshes && trackGenerator.collidableMeshes.length > 0) {
+      // Start high in the sky (Y = 2000) to ensure we always hit from above, even if vehicle falls below surface
+      this._groundRayOrigin.set(pos.x, 2000, pos.z);
       this._groundRaycaster.set(this._groundRayOrigin, this._groundRayDir);
-      const intersects = this._groundRaycaster.intersectObject(trackGenerator.roadMesh, true);
+      const intersects = this._groundRaycaster.intersectObjects(trackGenerator.collidableMeshes, false);
       if (intersects.length > 0) {
         return intersects[0].point.y;
       }

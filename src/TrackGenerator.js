@@ -75,20 +75,76 @@ export class TrackGenerator {
         statusText.textContent = "Unpacking and configuring 3D environment...";
       }
 
-      // Cache the road mesh node to enable high-speed visual-to-physics alignment
-      this.roadMesh = null;
+      // Cache collidable meshes (road and terrain) for high-speed flat-array raycasting
+      this.collidableMeshes = [];
+      const meshesInfo = [];
       gltf.scene.traverse((node) => {
-        if (node.isMesh && node.name.toUpperCase().includes("ROAD")) {
-          this.roadMesh = node;
+        if (node.isMesh) {
+          // Set all mesh materials to DoubleSide so raycasting works from any direction
+          if (node.material) {
+            if (Array.isArray(node.material)) {
+              node.material.forEach(m => m.side = THREE.DoubleSide);
+            } else {
+              node.material.side = THREE.DoubleSide;
+            }
+          }
+          
+          // Get lowercase material names for filtering
+          let matNames = [];
+          if (node.material) {
+            if (Array.isArray(node.material)) {
+              matNames = node.material.map(m => (m.name || '').toLowerCase());
+            } else if (node.material.name) {
+              matNames = [node.material.name.toLowerCase()];
+            }
+          }
+          
+          // Filter by material name
+          const isCollidable = matNames.some(matName => {
+            const includeKeywords = [
+              'track', 'grass', 'terrain', 'ground', 'road', 'gravel', 'soil', 'bank', 
+              'tarmac', 'stone', 'rumble', 'landscape', 'default', 'collision', 'rock', 
+              'drain', 'edge'
+            ];
+            const excludeKeywords = [
+              'tree', '3dgrass', 'sponsor', 'allianz', 'rolex', 'billboard', 'sign', 'board',
+              'crowd', 'umbrella', 'balloon', 'people', 'vehicle', 'car', 'truck', 'van', 'safety',
+              'crane', 'ambulance', 'recovery', 'lift', 'fence', 'wire', 'armco', 'guard', 'post',
+              'barrier', 'wall', 'building', 'garage', 'paddock', 'center', 'petrol', 'toilet',
+              'stand', 'tower', 'jumbotron', 'screen', 'lights', 'gantry', 'flag', 'decal',
+              'skidmark', 'props', 'speaker', 'hut', 'sculpture', 'inflatable', 'container',
+              'pitwall', 'welcome', 'groove'
+            ];
+            
+            const hasInclude = includeKeywords.some(kw => matName.includes(kw));
+            const hasExclude = excludeKeywords.some(kw => matName.includes(kw));
+            return hasInclude && !hasExclude;
+          });
+          
+          if (isCollidable) {
+            this.collidableMeshes.push(node);
+          }
+          
+          meshesInfo.push({
+            name: node.name,
+            materialName: node.material ? (Array.isArray(node.material) ? node.material.map(m=>m.name).join(',') : node.material.name) : 'none',
+            isCollidable: isCollidable,
+            visible: node.visible,
+            position: [node.position.x, node.position.y, node.position.z],
+            scale: [node.scale.x, node.scale.y, node.scale.z]
+          });
         }
       });
-      if (!this.roadMesh) {
+      
+      if (this.collidableMeshes.length === 0) {
+        console.warn("No collidable meshes matched materials, falling back to all meshes.");
         gltf.scene.traverse((node) => {
-          if (node.isMesh && !this.roadMesh) {
-            this.roadMesh = node;
+          if (node.isMesh) {
+            this.collidableMeshes.push(node);
           }
         });
       }
+      
       
       this.scene.add(this.trackMesh);
       this.trackMesh.updateMatrixWorld(true);
