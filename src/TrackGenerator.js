@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
-const TRACK_URL = "https://github.com/chrisI0/RennenSP/releases/download/v1.0.0/redbull_ring.glb";
+const TRACK_URL = "https://cdn.jsdelivr.net/gh/chrisI0/RennenSP@v1.0.0/redbull_ring.glb";
 
 export class TrackGenerator {
   constructor(scene, onLoadCallback) {
