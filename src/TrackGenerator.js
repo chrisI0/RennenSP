@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
+const TRACK_URL = "https://github.com/chrisI0/RennenSP/releases/download/v1.0.0/redbull_ring.glb";
+
 export class TrackGenerator {
-  constructor(scene, modelUrl, onLoadCallback) {
+  constructor(scene, onLoadCallback) {
     this.scene = scene;
     
     // 1. Mathematically construct the authentic Z-axis aligned Red Bull Ring path vectors
@@ -65,7 +67,7 @@ export class TrackGenerator {
 
     const loader = new GLTFLoader();
     loader.setDRACOLoader(dracoLoader);
-    loader.load(modelUrl, (gltf) => {
+    loader.load(TRACK_URL, (gltf) => {
       this.trackMesh = gltf.scene;
       
       const loaderText = document.querySelector('.loader-text');

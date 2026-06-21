@@ -29,3 +29,6 @@ dist-ssr
 # OS metadata
 desktop.ini
 Thumbs.db
+
+# Ignore heavy 3D asset files
+public/*.glb

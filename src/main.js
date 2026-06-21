@@ -94,7 +94,7 @@ async function init() {
   let trackLoadPromise = Promise.resolve();
   try {
     trackLoadPromise = new Promise((resolve) => {
-      trackGenerator = new TrackGenerator(scene, '/redbull_ring.glb', resolve);
+      trackGenerator = new TrackGenerator(scene, resolve);
     });
     trackCurve = trackGenerator.curve;
     console.log("Successfully loaded local circuit configuration: " + trackConfig.name);
