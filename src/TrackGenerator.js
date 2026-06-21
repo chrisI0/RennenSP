@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+// Register BVH in Three.js prototypes for automatic acceleration
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const TRACK_URL = "/redbull_ring.glb";
 
@@ -122,6 +128,9 @@ export class TrackGenerator {
           });
           
           if (isCollidable) {
+            if (node.geometry) {
+              node.geometry.computeBoundsTree();
+            }
             this.collidableMeshes.push(node);
           }
           
@@ -140,6 +149,9 @@ export class TrackGenerator {
         console.warn("No collidable meshes matched materials, falling back to all meshes.");
         gltf.scene.traverse((node) => {
           if (node.isMesh) {
+            if (node.geometry) {
+              node.geometry.computeBoundsTree();
+            }
             this.collidableMeshes.push(node);
           }
         });

@@ -375,6 +375,30 @@ export class SimpleRaycastVehicle {
 
     let groundedCount = 0;
 
+    // ── Chassis Center Raycast & Ground Plane Calculation ──
+    let centerGroundY = 0;
+    const hitNormal = new THREE.Vector3(0, 1, 0);
+    let hasGroundHit = false;
+
+    if (trackGenerator && trackGenerator.collidableMeshes && trackGenerator.collidableMeshes.length > 0) {
+      this._groundRayOrigin.set(this.position.x, 2000, this.position.z);
+      this._groundRaycaster.set(this._groundRayOrigin, this._groundRayDir);
+      const intersects = this._groundRaycaster.intersectObjects(trackGenerator.collidableMeshes, false);
+      if (intersects.length > 0) {
+        centerGroundY = intersects[0].point.y;
+        if (intersects[0].face && intersects[0].face.normal) {
+          hitNormal.copy(intersects[0].face.normal).transformDirection(intersects[0].object.matrixWorld);
+        }
+        hasGroundHit = true;
+      }
+    }
+
+    if (!hasGroundHit && trackGenerator) {
+      trackGenerator.findClosestPointToPoint(this.position, this._scratchTrackPoint);
+      centerGroundY = this._scratchTrackPoint.y;
+      hitNormal.set(0, 1, 0);
+    }
+
     // ────────────────────────────────────────────────────────
     //  PER-WHEEL LOOP
     // ────────────────────────────────────────────────────────
@@ -390,8 +414,14 @@ export class SimpleRaycastVehicle {
       const r = this._v[0];
       r.subVectors(wp, this.position);
 
-      // ── Raycast toward track surface ────────────────────
-      const groundHeight = this.getGroundHeight(wp, trackGenerator);
+      // ── Ground Height at Wheel (Projected onto the plane) ──
+      let groundHeight = centerGroundY;
+      if (Math.abs(hitNormal.y) > 0.05) {
+        const dx = wp.x - this.position.x;
+        const dz = wp.z - this.position.z;
+        groundHeight = centerGroundY - (hitNormal.x * dx + hitNormal.z * dz) / hitNormal.y;
+      }
+      
       const distToGround = wp.y - groundHeight;
 
       if (distToGround >= this.suspensionRestLength) {
@@ -596,8 +626,7 @@ export class SimpleRaycastVehicle {
     // ────────────────────────────────────────────────────────
     //  GROUND CONSTRAINT
     // ────────────────────────────────────────────────────────
-    const trackElevation = this.getGroundHeight(this.position, trackGenerator);
-    const minY = trackElevation + this.chassisHeight * 0.5;
+    const minY = centerGroundY + this.chassisHeight * 0.5;
     if (this.position.y < minY) {
       this.position.y = minY;
       if (this.velocity.y < 0) this.velocity.y = 0;
