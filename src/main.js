@@ -143,9 +143,7 @@ async function init() {
   const carPos = new THREE.Vector3();
   const closestPoint = new THREE.Vector3();
 
-  const raycaster = new THREE.Raycaster();
-  const rayOrigin = new THREE.Vector3();
-  const rayDirection = new THREE.Vector3(0, -1, 0);
+
   
   function animate() {
     requestAnimationFrame(animate);
@@ -211,22 +209,6 @@ async function init() {
     }
 
     vehicle.update(dt, inputManager, trackGenerator);
-
-    // Perform downward raycast to find true track elevation and clamp vehicle altitude
-    if (trackGenerator && trackGenerator.trackMesh && vehicle && vehicle.gravityEnabled) {
-      rayOrigin.set(vehicle.position.x, vehicle.position.y + 10, vehicle.position.z);
-      raycaster.set(rayOrigin, rayDirection);
-      const intersects = raycaster.intersectObjects([trackGenerator.trackMesh], true);
-      if (intersects.length > 0) {
-        const targetGroundY = intersects[0].point.y;
-        if (vehicle.physicsBody) {
-          vehicle.physicsBody.position.y = targetGroundY + 0.1;
-        } else {
-          vehicle.position.y = targetGroundY + 0.1;
-          vehicle.mesh.position.y = vehicle.position.y;
-        }
-      }
-    }
 
     cameraManager.update(dt, vehicle.mesh, vehicle.velocity);
 
